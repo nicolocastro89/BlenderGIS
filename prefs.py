@@ -56,6 +56,7 @@ DEFAULT_OVERPASS_SERVER =  [
 #default filter tags for OSM import
 DEFAULT_OSM_TAGS = [
 	'building',
+	'building:part',
 	'highway',
 	'landuse',
 	'leisure',

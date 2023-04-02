@@ -1,0 +1,27 @@
+Metadata-Version: 2.1
+Name: cmake-generators
+Version: 1.0.9
+Summary: Query cmake-generators
+Home-page: https://github.com/TylerGubala/cmake-generators
+Author: Tyler Gubala
+Author-email: gubalatyler@gmail.com
+License: GPL-3.0
+Keywords: cmake,Automation
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Win32 (MS Windows)
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
+Classifier: Natural Language :: English
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Requires-Python: >=3.4.0
+Description-Content-Type: text/markdown
+
+# cmake-generators
+Parse information about cmake generators in Python
+
+

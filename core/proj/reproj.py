@@ -19,7 +19,7 @@
 
 
 import math
-
+from __future__ import annotations
 from .srs import SRS
 from .utm import UTM, UTM_EPSG_CODES
 from .ellps import GRS80
@@ -254,8 +254,7 @@ class Reproj():
 			elif crs2.isUTM:
 				self.utm = UTM.init_from_epsg(crs2)
 
-
-	def pts(self, pts):
+	def pts(self, pts)-> list[tuple[float,float]]:
 		if len(pts) == 0:
 			return []
 
@@ -306,7 +305,7 @@ class Reproj():
 			elif self.crs1 in UTM_EPSG_CODES and self.crs2 == 4326:
 				return [self.utm.utm_to_lonlat(*pt) for pt in pts]
 
-	def pt(self, x, y):
+	def pt(self, x, y)->tuple[float,float]:
 		if x is None or y is None:
 			raise ReprojError('Cannot reproj None coordinates')
 		return self.pts([(x,y)])[0]

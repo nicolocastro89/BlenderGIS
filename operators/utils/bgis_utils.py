@@ -1,4 +1,4 @@
-
+from __future__ import annotations
 import bpy
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
@@ -24,6 +24,33 @@ def mouseTo3d(context, x, y):
 	loc = region_2d_to_location_3d(reg, reg3d, coords, vec) #WARNING, this function return indeterminate value when view3d clip distance is too large
 	return loc
 
+class RayCastHit():
+	originating_node_ids: list[int] = []
+	_hit:bool = None
+	
+	@property
+	def hit(self)->bool:
+		return self._hit if self._hit is not None else self.loc is not None
+
+	@hit.setter
+	def hit(self, value):
+		self._hit = value
+
+	normal: Vector | list[float] = None
+
+	loc: Vector = None
+
+	faceIdx:int = None
+
+	dst: Vector = None
+
+	def __init__(self, **kwargs):
+		_hit = kwargs.get('hit', None)
+		normal = kwargs.get('normal', None)
+		loc = kwargs.get('loc', None)
+		faceIdx = kwargs.get('faceIdx', None)
+		dst = kwargs.get('dst', None)
+		self.originating_node_ids = kwargs('originates_from', [])
 
 class DropToGround():
 	'''A class to perform raycasting accross z axis'''
@@ -45,17 +72,16 @@ class DropToGround():
 		orgObjSpace = self.mwi @ orgWldSpace
 		direction = Vector((0,0,-1)) #down
 		#build ray cast hit namespace object
-		class RayCastHit(): pass
 		rcHit = RayCastHit()
 		#raycast
 		if self.method == 'OBJ':
 			rcHit.hit, rcHit.loc, rcHit.normal, rcHit.faceIdx = self.ground.ray_cast(orgObjSpace, direction)
 		elif self.method == 'BVH':
 			rcHit.loc, rcHit.normal, rcHit.faceIdx, rcHit.dst = self.bvh.ray_cast(orgObjSpace, direction)
-			if not rcHit.loc:
-				rcHit.hit = False
-			else:
-				rcHit.hit = True
+			# if not rcHit.loc:
+			# 	rcHit.hit = False
+			# else:
+			# 	rcHit.hit = True
 		#adjust values
 		if not rcHit.hit:
 			#return same original 2d point with z=0

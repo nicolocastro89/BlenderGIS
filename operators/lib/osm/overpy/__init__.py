@@ -3,6 +3,7 @@ from decimal import Decimal
 import re
 import sys
 import os
+from . import OSMLibrary
 
 from . import exception
 from .__about__ import (
@@ -142,9 +143,10 @@ class Overpass(object):
         if isinstance(data, bytes):
             data = data.decode(encoding)
         data = json.loads(data, parse_float=Decimal)
-        return Result.from_json(data, api=self)
+        return OSMLibrary.OSMLibrary.from_json(data)
+        #return Result.from_json(data, api=self)
 
-    def parse_xml(self, data, encoding="utf-8"):
+    def parse_xml(self, data, encoding="utf-8") -> OSMLibrary.OSMLibrary:
         """
 
         :param data: Raw XML Data
@@ -166,8 +168,9 @@ class Overpass(object):
             if PY2 and not isinstance(data, str):
                 # Python 2.x: Convert unicode strings
                 data = data.encode(encoding)
-
-        return Result.from_xml(data, api=self)
+        # 
+        return OSMLibrary.OSMLibrary.from_xml(data)
+        #return Result.from_xml(data, api=self)
 
 
 class Result(object):

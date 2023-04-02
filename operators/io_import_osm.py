@@ -4,6 +4,8 @@ import json
 import random
 
 import logging
+
+from .lib.osm.overpy.OSMLibrary import OSMLibrary
 log = logging.getLogger(__name__)
 
 import bpy
@@ -42,11 +44,14 @@ closedWaysArePolygons = ['aeroway', 'amenity', 'boundary', 'building', 'craft', 
 closedWaysAreExtruded = ['building']
 
 
+escape_chars = [':']
+
 def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'relation'], format='json'):
 
 		'''
 		QL template syntax :
 		[out:json][bbox:ymin,xmin,ymax,xmax];(node[tag1];node[tag2];((way[tag1];way[tag2];);>;);relation;);out;
+		TODO ? add >; after relationship
 		'''
 
 		#s,w,n,e <--> ymin,xmin,ymax,xmax
@@ -69,13 +74,13 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 		if 'way' in types:
 			union += '(('
 			if tags:
-				union += ';'.join( ['way['+tag+']' for tag in tags] ) + ';);'
+				union += ';'.join( [f'way[\"{tag}\"]' if any(c in tag for c in escape_chars) else f'way[{tag}]'for tag in tags] ) + ';);'
 			else:
 				union += 'way;);'
 			union += '>;);'
 		#all relations (no filter tag applied)
 		if 'relation' in types or 'rel' in types:
-			union += 'relation;'
+			union += 'relation;>;'
 		union += ')'
 
 		output = ';out;'
@@ -158,6 +163,18 @@ class OSM_IMPORT():
 	defaultHeight: FloatProperty(name='Default Height', description='Set the height value using for extrude building when the tag is missing', default=20)
 	levelHeight: FloatProperty(name='Level height', description='Set a height for a building level, using for compute extrude height based on number of levels', default=3)
 	randomHeightThreshold: FloatProperty(name='Random height threshold', description='Threshold value for randomize default height', default=0)
+
+
+
+	def get_build_params(self):
+		return {
+			'default_height':self.defaultHeight,
+			'random_height_threshold': self.randomHeightThreshold,
+			'level_height': self.levelHeight,
+			'highway_subdivision_size': 5
+			#'extrusion_axis': self.extrusionAxis
+		}
+
 
 	def draw(self, context):
 		layout = self.layout
@@ -571,9 +588,9 @@ class IMPORTGIS_OT_osm_file(Operator, OSM_IMPORT):
 		log.info('File parsed in {} seconds'.format(round(t, 2)))
 
 		#Get bbox
-		bounds = result.bounds
-		lon = (bounds["minlon"] + bounds["maxlon"])/2
-		lat = (bounds["minlat"] + bounds["maxlat"])/2
+		bounds = result._bounds
+		lon = (bounds.minlon + bounds.maxlon)/2
+		lat = (bounds.minlat + bounds.maxlat)/2
 		#Set CRS
 		if not geoscn.hasCRS:
 			try:
@@ -589,7 +606,24 @@ class IMPORTGIS_OT_osm_file(Operator, OSM_IMPORT):
 
 		#Build meshes
 		t0 = perf_clock()
-		self.build(context, result, geoscn.crs)
+		if isinstance(result, overpy.Result):
+			self.build(context, result, geoscn.crs)
+		elif isinstance(result, OSMLibrary):
+			build_parameters = self.get_build_params()
+
+			if self.useElevObj:
+				if not self.objElevLst:
+					log.error('There is no elevation object in the scene to get elevation from')
+					self.report({'ERROR'}, "There is no elevation object in the scene to get elevation from")
+					return {'FINISHED'}
+			elevObj = scn.objects[int(self.objElevLst)] if self.useElevObj else None
+			result.preprocess()
+			result.build(context, dstCRS = geoscn.crs, elevObj = elevObj, separate = self.separate, build_parameters=build_parameters)
+
+		bbox = getBBOX.fromScn(scn)
+		adjust3Dview(context, bbox, zoomToSelect=False)
+
+		# self.build(context, result, geoscn.crs)
 		t = perf_clock() - t0
 		log.info('Mesh build in {} seconds'.format(round(t, 2)))
 
@@ -677,8 +711,19 @@ class IMPORTGIS_OT_osm_query(Operator, OSM_IMPORT):
 			return {'CANCELLED'}
 		else:
 			log.info('Overpass query successful')
+		if isinstance(result, overpy.Result):
+			self.build(context, result, geoscn.crs)
+		elif isinstance(result, OSMLibrary):
 
-		self.build(context, result, geoscn.crs)
+			build_parameters = self.get_build_params()
+			if self.useElevObj:
+				if not self.objElevLst:
+					log.error('There is no elevation object in the scene to get elevation from')
+					self.report({'ERROR'}, "There is no elevation object in the scene to get elevation from")
+					return {'FINISHED'}
+			elevObj = scn.objects[int(self.objElevLst)] if self.useElevObj else None
+			result.preprocess()
+			result.build(context, dstCRS = geoscn.crs, elevObj = elevObj, separate = self.separate, build_parameters=build_parameters)
 
 		bbox = getBBOX.fromScn(scn)
 		adjust3Dview(context, bbox, zoomToSelect=False)

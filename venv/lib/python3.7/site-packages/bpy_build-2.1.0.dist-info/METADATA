@@ -1,0 +1,47 @@
+Metadata-Version: 2.1
+Name: bpy-build
+Version: 2.1.0
+Summary: Find Blender sources in version control, create build scripts
+Home-page: https://github.com/TylerGubala/bpy-build
+Author: Tyler Gubala
+Author-email: gubalatyler@gmail.com
+License: GPL-3.0
+Keywords: Blender,3D,Animation,Renderer,Rendering
+Platform: UNKNOWN
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Win32 (MS Windows)
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: GNU General Public License v3 (GPLv3)
+Classifier: Natural Language :: English
+Classifier: Operating System :: Microsoft :: Windows :: Windows 10
+Classifier: Programming Language :: C
+Classifier: Programming Language :: C++
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Topic :: Artistic Software
+Classifier: Topic :: Education
+Classifier: Topic :: Multimedia
+Classifier: Topic :: Multimedia :: Graphics
+Classifier: Topic :: Multimedia :: Graphics :: 3D Modeling
+Classifier: Topic :: Multimedia :: Graphics :: 3D Rendering
+Classifier: Topic :: Games/Entertainment
+Requires-Python: >=3.4.0
+Description-Content-Type: text/markdown
+Requires-Dist: cmake (>=3.13.5)
+Requires-Dist: cmake-generators
+Requires-Dist: GitPython
+Requires-Dist: svn
+Requires-Dist: distro
+
+# bpy-build
+Python build script for Blender as a python module
+
+It needs to be its own repository to satisfy the `install_requires` of blenderpy
+
+It is important to note that this is a toolset to build your own Blender build scripts. It does not create builds for you. It just generates the build script.
+
+
