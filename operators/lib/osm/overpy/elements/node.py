@@ -21,14 +21,11 @@ class OSMNode(OSMElement):
     _osm_name: ClassVar[str] = 'node'
     detail_level: ClassVar[int] = 1
 
-    _referenced_by: dict[type, set[int]]
+    
     _lat:Num
     _lon:Num
     _ele:Num
 
-    @property
-    def references(self):
-        return set().union(*self._referenced_by.values()) 
     
     def __str__(self):
         return f"OSMNode with id: {self._id} located at Lon:{self._lon}, Lat{self._lat} and tags:\n{pprint.pformat(self._tags)}"
