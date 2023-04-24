@@ -9,9 +9,10 @@ from typing import ClassVar, TypeVar
 from xml.etree.ElementTree import Element
 
 from .....utils.bgis_utils import DropToGround, RayCastHit
-from .....utils.blender import appendObjectsFromAssets, createCollection, almost_overlapping
+from .....utils.blender import appendObjectsFromAssets, createCollection, almost_overlapping, merge_splines
 from .node import OSMNode
 from .way import OSMWay
+from .man_made import OSMBridge
 from mathutils import Vector
 from bpy.types import Spline
 
@@ -36,8 +37,8 @@ T = TypeVar('T', bound='OSMHighway')
 
 @dataclass
 class HighwayContinuation:
-    before: OSMHighway|None
-    after: OSMHighway|None
+    before: list[OSMHighway]
+    after: list[OSMHighway]
 
 class OSMHighway(OSMWay):
     '''A Highway is any kind of road, street or path. This is a base class which should never be directly
@@ -55,6 +56,7 @@ class OSMHighway(OSMWay):
     assetFile: ClassVar[str] = "way_profiles.blend"
     collectionName: ClassVar[str] = "way_profiles"
 
+    
     @property
     def highway_type(self):
         return self._tags['highway']
@@ -64,8 +66,11 @@ class OSMHighway(OSMWay):
         profile_subtype = self.highway_type
         if profile_subtype == 'motorway_link':
             profile_subtype = 'motorway'
+        
         profile_type= "roads" if profile_subtype in self._highways_roads else  "paths"
-        return f'profile_roads_{self.highway_type}'
+        if profile_type=='paths':
+            profile_subtype = 'footway'
+        return f'profile_{profile_type}_{profile_subtype}'
     
     def __str__(self):
         return f"OSMWay of road with id: {self._id}, made up of {len(self._node_ids)} nodes(s) and tags:\n{pprint.pformat(self._tags)}"
@@ -94,15 +99,15 @@ class OSMHighway(OSMWay):
 
         dx, dy = geoscn.crsx, geoscn.crsy
 
-        delta_xy = Vector(dx,dy)
+        delta_xy = Vector((dx,dy))
         pts = [(float(node._lon), float(node._lat)) for node in self.nodes]
         pts = [{'point':Vector(xy)-delta_xy, 'nodes':[self.nodes[idx]]} for idx, xy in enumerate(reproject.pts(pts))]
         if subdivision_size:
             subdivided=[]
-            subdivided.append(first)
+            subdivided.append(pts[0])
             for first, second in zip(pts, pts[1:]):
-                number_steps, vector = self.getSubdivisionParams(first['xy'], second['xy'], subdivision_size)
-                subdivided.extend(({'point': first['xy']+step*vector, 'nodes':[]} for step in range(1,number_steps)))
+                number_steps, vector = self.getSubdivisionParams(first['point'], second['point'], subdivision_size)
+                subdivided.extend(({'point': first['point']+step*vector, 'nodes':[]} for step in range(1,number_steps)))
             subdivided.append(pts[-1])
             pts=subdivided
 
@@ -116,13 +121,15 @@ class OSMHighway(OSMWay):
 
             hits = [pt.hit for pt in rc_hits]
             if not all(hits) and any(hits):
-                zs = [p.loc.z for p in pts if p.hit]
+                zs = [p.loc.z for p in rc_hits if p.hit]
                 meanZ = sum(zs) / len(zs)
-                for v in pts:
+                for v in rc_hits:
                     if not v.hit:
                         v.loc.z = meanZ
         else:
-            pts = [ RayCastHit(loc=(v['point'].x, v['point'].y, 0), hit = True, originates_from= v['nodes']) for v in pts]
+            rc_hits = [ RayCastHit(loc=(v['point'].x, v['point'].y, 0), hit = True, originates_from= v['nodes']) for v in pts]
+
+        return rc_hits
 
         # pts = [(float(node._lon), float(node._lat)) for node in self.nodes]
         # pts = reproject.pts(pts)
@@ -184,46 +191,137 @@ class OSMHighway(OSMWay):
         
         first_referenced = self._library.get_elements_by_ids(list(first.get_referenced_from().get(OSMHighway, set())))
         first_referenced = [h for h in first_referenced if h._id!=self._id and h.highway_type == self.highway_type and first in h.end_points()]
-        first_referenced = first_referenced[0] if len(first_referenced)==1 else None
+        #first_referenced = first_referenced[0] if len(first_referenced)==1 else None
 
         last_referenced = self._library.get_elements_by_ids(list(last.get_referenced_from().get(OSMHighway, set())))
         last_referenced = [h for h in last_referenced if h._id!=self._id and h.highway_type == self.highway_type and last in h.end_points()]
-        last_referenced = last_referenced[0] if len(last_referenced)==1 else None
+        #last_referenced = last_referenced[0] if len(last_referenced)==1 else None
 
         return HighwayContinuation(first_referenced, last_referenced)
+
+    @classmethod
+    def preprocess(cls, library: OSMLibrary):
+        bridges = library.create_bvh_tree(element_type = OSMBridge)
+        highways = library.get_elements(cls).values()
+        for part in highways:
+            part.preprocess_instance(bridges)
+
+        # # split in to parts as creating connections between highways requires assigning
+        # #references to the nodes
+        # for part in highways:
+        #     part.preprocess_full_highways()
+
+        # for part in highways:
+        #     if 'bridge' in part._tags:
+        #         part.preprocess_bridge_tunnel(context)
+    
+  
+
+    def preprocess_instance(self, bridges: tuple['BVHTree',list[int]]):
+        """Preprocess the highway by doing the following in order:
+        - Adding a reference to the highway in all nodes referenced
+        - add references to before and after highways"""
+        self._is_preprocessed = False
+        super(OSMHighway,self).preprocess_instance()
+
+        if "bridge" in self._tags:
+            for n in self.nodes:
+                buildingIndex = bridges[0].ray_cast((n._lat, n._lon, -1.), zAxis)[2]
+
+                if buildingIndex is not None:
+                    # we consider that <part> is located inside <buildings[buildingIndex]>
+                    osm_bridge = self._library.get_element_by_id(self._library.bvh_tree_index[buildingIndex])
+                    self.add_reference(OSMBridge, osm_bridge._id)
+                    osm_bridge.add_reference(OSMHighway, self._id)
+
+
+        self._is_preprocessed = True
+        return
+
+    def preprocess_nodes(self):
+        full_highway = [self]
+        continuation = self.get_highway_continuation()
+        if continuation.after:
+            full_highway.append(continuation.after)
+            full_highway.extend(continuation.after.get_all_highway_parts(self))
+        if continuation.before:
+            full_highway.insert(0,continuation.before)
+            full_highway[:0] = continuation.before.get_all_highway_parts(self)
+        
+        all_points = []
+        highway_parts = groupby(full_highway, key= lambda p: next((t for t in self._highways_to_level if t in p._tags), None))
+        for k,highway_part in highway_parts:
+
+            points = self.combine_highway_points(list(highway_part), geoscn, reproject, ray_caster, build_parameters)
+
+            splines_points = [list(g) for k, g in groupby(points, key= lambda p: p.hit) if k]
+            for spline_points in splines_points: 
+                if k:
+                    self.level_points(spline_points)
+                all_points.append(spline_points)  
+
 
     def build_instance(self, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict = {}, continue_from:bpy.types.Object|None = None) -> bpy.types.Object|None:
         if self._is_built:
             return
-        #Create a new bmesh
+        
         if continue_from is not None:
             obj = continue_from
         else:
-            curve = bpy.data.curves.new(f'{self._id}', 'CURVE')
-            curve.fill_mode = 'NONE'
-            if hasattr(curve, "bevel_mode"):
-                curve.bevel_mode = 'OBJECT'
-            obj = bpy.data.objects.new(f'{self._id}', curve)
-
-        if obj.vertex_groups.get(f'{self._id}',None) is None:
-            obj.vertex_groups.add(f'{self._id}')
-        self._build_instance(obj, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
-        if continue_from is None:
+            curve_data = bpy.data.curves.new(f'curve_data_{self._id}', 'CURVE')
+            curve_data.fill_mode = 'NONE'
+            curve_data.dimensions = '3D'
+            if hasattr(curve_data, "bevel_mode"):
+                curve_data.bevel_mode = 'OBJECT'
+            obj = bpy.data.objects.new(f'curve_object_{self._id}', curve_data)
+            #curve = obj.data.splines.new(type='POLY')
             geoscn.scn.collection.objects.link(obj)
-        self._is_built =True
-        continuation = self.get_highway_continuation()
-        if continuation.after is not None:
-            continuation.after.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters, continue_from=obj)
-        if continuation.before is not None:
-            continuation.before.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters, continue_from=obj)
+
+        self._build_highway(obj, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
+
         obj.data.bevel_object = bpy.data.objects.get(self.bevel_name)
         return obj
 
-    
-    def _build_instance(self, obj, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+    def _build_highway(self, obj, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+        full_highway = [self]
+        continuation = self.get_highway_continuation()
+        if continuation.after:
+            full_highway.append(continuation.after)
+            full_highway.extend(continuation.after.get_all_highway_parts(self))
+        if continuation.before:
+            full_highway.insert(0,continuation.before)
+            full_highway[:0] = continuation.before.get_all_highway_parts(self)
         
+        all_points = []
+        
+        highway_parts = groupby(full_highway, key= lambda p: next((t for t in self._highways_to_level if t in p._tags), None))
+        for k,highway_part in highway_parts:
+
+            points = self.combine_highway_points(list(highway_part), geoscn, reproject, ray_caster, build_parameters)
+
+            splines_points = [list(g) for k, g in groupby(points, key= lambda p: p.hit) if k]
+            for spline_points in splines_points: 
+                if k:
+                    self.level_points(spline_points)
+                all_points.append(spline_points)  
+
+        new_spline = obj.data.splines.new('POLY')
+        new_spline.use_endpoint_u = True
+        new_spline.points.add(sum(len(l)-1 for l in all_points))
+        new_spline.points[0].co = (*all_points[0][0].loc,1.0)
+        i = 1
+        for ps in all_points:
+            for p in ps[1:]:
+                new_spline.points[i].co = (*p.loc,1.0)
+                i += 1
+
+        for highway_part in full_highway:
+            highway_part._is_built = True
+
+
+    def _build_instance(self, obj, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+        end_nodes = [self.nodes[0], self.nodes[-1]]
         points = self.get_ray_cast_hit_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size=build_parameters.get('highway_subdivision_size', None))
-        ends = [points[0].loc,points[-1].loc]
         full_extension=[]
         if any(t in self._tags for t in self._highways_to_level):
             continuation = self.get_highway_continuation()
@@ -244,50 +342,49 @@ class OSMHighway(OSMWay):
 
         splines_points = [list(g) for k, g in groupby(points, key= lambda p: p.hit) if k]
         for spline_points in splines_points:
-            #override = context.copy()
-            _spline = next((s for s in obj.data.splines if any(almost_overlapping(s.points[0].co, e) for e in ends) or any(almost_overlapping(s.points[-1].co, e) for e in ends)), None)
-            start_at=0
-            if _spline is None:
-                _spline = obj.data.splines.new('POLY')
-                _spline.use_endpoint_u = True
-                _spline.points[start_at+idx].co=(*spline_points[0].loc,1.0)
-                #_spline.points.add(len(spline_points)-1)
-            else:
-                #if the end of the spline matches the end of the new points or vice versa reverse the points
-                if almost_overlapping(_spline.points[-1].co, ends[-1]) or  almost_overlapping(_spline.points[0].co, ends[0]):
-                    spline_points.reverse()
 
-                #If the end of the spline matches one of the new endpoints start at the end
-                if _spline.points[-1].co.xyz in ends:
-                    start_at=len(_spline.points)-1
-                    _spline.points.add(len(spline_points)-1)
-                else: #shift the spline 
-                    self.shift_spline_by(_spline, len(spline_points)-1)
+            continue_spline = next((s for s in obj.data.splines if any(s.points[0] in e.blender_objects for e in end_nodes) or any(s.points[-1] in e.blender_objects for e in end_nodes)), None)
+            last_point = 0
+            first_point = 0
+
+            new_spline = obj.data.splines.new('POLY')
+            new_spline.use_endpoint_u = True
+            new_spline.points.add(len(spline_points)-2)
+            #new_spline.points[0].co = (*spline_points[0].loc,1.0)
             
-            BOC.select_all(action='DESELECT')
-            select_spline_point(_spline.points[start_at]) # the new point will be connected here
-            BOC.vertex_add(location=location)
-            for idx, p in enumerate(spline_points):
-                _spline.points[start_at+idx].co=(*p.loc,1.0)
-                for n in p.originating_node_ids:
-                    group = obj.vertex_groups.get(f'{n}', None)
-                    if group is None:
-                        group = obj.vertex_groups.new(f'{n}')
 
-                    group.add(_spline.points[start_at+idx].index, 1, 'ADD')
-                        
+            if continue_spline is None:
+                continue_spline = obj.data.splines.new('POLY')
+                continue_spline.use_endpoint_u = True
+                continue_spline.points[0].co = (*spline_points[0].loc,1.0)
+                self.nodes[0].add_blender_object_reference(continue_spline.points[0])
+            else:
+                new_spline.points.add(len(spline_points)-2)
+                if continue_spline.points[-1] in end_nodes[-1].blender_objects:
+                    last_point = -1
+                    first_point = -1
+                elif continue_spline.points[0] in end_nodes[-1].blender_objects:
+                    last_point = 0
+                    first_point = -1
+                elif continue_spline.points[0] in end_nodes[0].blender_objects:
+                    last_point = 0
+                    first_point = 0
+                elif continue_spline.points[-1] in end_nodes[0].blender_objects:
+                    last_point = -1
+                    first_point = 0
 
-            _spline = None
+            for idx, p in enumerate(spline_points[1:]):
+                new_spline.points[idx].co = (*p.loc,1.0)
+
+                for node in p.originating_node_ids:
+                    node.add_blender_object_reference(new_spline.points[idx])
+
+            if last_point is not None and first_point is not None:
+                merge_splines(obj, continue_spline, last_point, new_spline, first_point)
+
         for part in full_extension:
             part._is_built = True
 
-    def select_spline_point(point):
-        if isinstance(point, bpy.types.BezierSplinePoint):
-            point.select_control_point = True
-            point.select_left_handle = True
-            point.select_right_handle = True
-        else:
-            point.select = True
 
     def combine_highway_points(self, highway_parts: list[OSMHighway], geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={}):
         points = highway_parts[0].get_ray_cast_hit_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size=build_parameters.get('highway_subdivision_size', None))
@@ -298,6 +395,8 @@ class OSMHighway(OSMWay):
             part_points = current_part.get_ray_cast_hit_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size=build_parameters.get('highway_subdivision_size', None))
             if current_part.nodes[-1] == previous_part.nodes[-1]:
                 part_points.reverse()
+            if current_part.nodes[0] == previous_part.nodes[0]:
+                points.reverse()
 
             points.extend(part_points[1:])
         return points
