@@ -132,3 +132,9 @@ class OSMWay(OSMElement):
         pts = self.get_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
         
         return [bm.verts.new(pt) for pt in pts]                      
+
+    def calculate_length(self, geoscn = None, reproject = None,  ray_caster: DropToGround = None):
+        pts = pts = [(float(node._lon), float(node._lat), 0) for node in self.nodes]
+        if geoscn is not None and reproject is not None:
+            pts = self.get_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
+        return sum(((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2)**0.5 for p1, p2 in zip(pts[:-1], pts[1:]))
