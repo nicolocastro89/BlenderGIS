@@ -6,6 +6,7 @@ import bpy, bmesh
 import addon_utils 
 from ... import bl_info
 from mathutils import Vector
+BOC = bpy.ops.curve
 
 def appendObjectsFromFile(filepath, collection, names:list[str]|str):
     with bpy.data.libraries.load(filepath) as (data_from, data_to):
@@ -49,3 +50,77 @@ def almost_overlapping(point1: Vector, point2: Vector, max_distance = 0.5):
     
 def xy_distance(point1: Vector, point2: Vector):
     return (point1.xy-point2.xy).magnitude
+
+def add_spline_point(end_point, location):
+    BOC.select_all(action='DESELECT')
+    select_spline_point(end_point) # the new point will be connected here
+    BOC.vertex_add(location=location)
+
+def select_spline_point(spline, point):
+    if isinstance(spline.points[point], bpy.types.BezierSplinePoint):
+        spline.points[point].select_control_point = True
+        spline.points[point].select_left_handle = True
+        spline.points[point].select_right_handle = True
+    else:
+        spline.points[point].select = True
+
+def merge_splines(curve_object, spline1, control_point_1, spline2, control_point_2):
+    spline1_idx = list(curve_object.data.splines).index(spline1)
+    spline2_idx = list(curve_object.data.splines).index(spline2)
+    override = bpy.context.copy()
+    override["selected_objects"] = [curve_object]
+    override["selected_editable_objects"] = [curve_object]
+    override["active_object"] = curve_object
+    override["objects_in_mode"] = [curve_object]
+    override["object"] = curve_object
+    override["edit_object"] = curve_object
+    override['view_layer']=bpy.context.view_layer
+    override["mode"] = 'EDIT_CURVE'
+
+    screen = bpy.context.window.screen
+    # bpy.context.view_layer.objects.active = your_object
+    area = next(a for a  in screen.areas if a.type=='VIEW_3D')
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    override["area"] = area
+    override['region'] = region
+    current_active = bpy.context.view_layer.objects.active
+    try:
+        with bpy.context.temp_override(**override):                
+            bpy.context.view_layer.objects.active = curve_object
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+            bpy.ops.curve.select_all(action='DESELECT')
+
+            select_spline_point(curve_object.data.splines[spline1_idx], control_point_1)
+            select_spline_point(curve_object.data.splines[spline2_idx], control_point_2)
+            bpy.ops.curve.make_segment()
+    except Exception as e:
+        print(e)
+    finally:
+        bpy.context.view_layer.objects.active = current_active
+        bpy.ops.object.mode_set(mode = 'OBJECT')
+        # control_point_1.select_control_point = True
+        # control_point_1.select_left_handle = True
+        # control_point_1.select_right_handle = True
+
+        # control_point_2.select_control_point = True
+        # control_point_2.select_left_handle = True
+        # control_point_2.select_right_handle = True
+
+        # bpy.ops.curve.bpy.ops.curve()
+            
+
+        # if area.type == 'VIEW_3D':
+        #     override["area"] = area
+        #     with bpy.context.temp_override(**override):
+        #         mode = bpy.context.active_object.mode
+        #         if mode == 'OBJECT':
+        #             bpy.ops.object.mode_set(mode='EDIT')
+        #         BOC.select_all(action='DESELECT')
+        #         select_spline_point(control_point_1)
+        #         select_spline_point(control_point_2)
+        #         BOC.bpy.ops.curve()
+
+        #         if mode=='OBJECT':
+        #             bpy.ops.object.mode_set(mode=mode)
+    
