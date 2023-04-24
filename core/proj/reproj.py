@@ -1,3 +1,4 @@
+from __future__ import annotations
 # -*- coding:utf-8 -*-
 
 #  ***** GPL LICENSE BLOCK *****
@@ -19,7 +20,7 @@
 
 
 import math
-from __future__ import annotations
+
 from .srs import SRS
 from .utm import UTM, UTM_EPSG_CODES
 from .ellps import GRS80
