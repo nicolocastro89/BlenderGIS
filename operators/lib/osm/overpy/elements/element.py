@@ -31,15 +31,23 @@ class OSMElement(ABC):
     _is_preprocessed: bool = False
     _is_built: bool = False
 
-    _blender_object: bpy_struct = None
+    _referenced_by: dict[type, set[int]]
 
     @property
-    def blender_object(self):
-        return self._blender_object
+    def references(self):
+        return set().union(*self._referenced_by.values()) 
     
-    @blender_object.setter
-    def blender_object(self, value):
-        self._blender_object = value
+    def add_reference(self, type, id):
+        self._referenced_by.setdefault(type,set()).add(id)
+
+    _blender_objects: list[bpy_struct] = []
+
+    @property
+    def blender_objects(self)->list[bpy_struct]:
+        return self._blender_objects
+    
+    def add_blender_object_reference(self, obj:bpy_struct):
+        self._blender_objects.append(obj)
     
     @property
     def is_built(self):
@@ -52,10 +60,6 @@ class OSMElement(ABC):
         self._library = library
         self._id = int(kwargs.get("id", None))
         self._tags = kwargs.get("tags", {})
-        return
-
-    @classmethod
-    def preprocess(cls, library: OSMLibrary):
         return
 
     @classmethod
