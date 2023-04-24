@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .man_made import OSMBridge
 from .highway import OSMHighway
 from .building import OSMBuilding, OSMBuildingPart
 from .relation import OSMMultiPolygonBuildingPartRelation, OSMMultiPolygonBuildingRelation, OSMRelation, OSMBuildingRelation, OSMMultiPolygonRelation
@@ -17,6 +18,7 @@ _existing_elements:list[T] = [
     OSMRelation, 
     OSMWay, 
     OSMHighway,
+    OSMBridge,
     OSMBuilding, 
     OSMBuildingPart, 
     OSMBuildingRelation, 
