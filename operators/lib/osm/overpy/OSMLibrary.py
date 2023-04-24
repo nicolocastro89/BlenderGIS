@@ -72,7 +72,7 @@ class OSMLibrary(object):
     @property
     def bvh_tree(self)->'BVHTree':
         if self._bvh_tree is None:
-           self.create_bvh_tree(self.reprojector)
+           self._bvh_tree,  self._bvh_tree_index = self.create_bvh_tree(self.reprojector, OSMBuilding)
         return self._bvh_tree
 
     @bvh_tree.setter
@@ -82,7 +82,7 @@ class OSMLibrary(object):
     @property
     def bvh_tree_index(self)->'list["int"]':
         if self._bvh_tree_index is None:
-           self.create_bvh_tree(self.reprojector)
+           self.create_bvh_tree(self.reprojector, OSMBuilding)
         return self._bvh_tree_index
 
     @bvh_tree_index.setter
@@ -194,7 +194,7 @@ class OSMLibrary(object):
 
         return
 
-    def create_bvh_tree(self, reprojector: Reproj):
+    def create_bvh_tree(self, reprojector: Reproj, element_type)->tuple['BVHTree',list[int]]:
         from mathutils.bvhtree import BVHTree
         from .elements import OSMBuilding
 
@@ -219,8 +219,9 @@ class OSMLibrary(object):
             polygons.append(tuple(range(polygon_start, polygon_end)))
             polygon_start = polygon_end
             bvh_index.append(idx)
-        self.bvh_tree = BVHTree.FromPolygons(vertices, polygons)
-        self.bvh_tree_index = bvh_index
+        return BVHTree.FromPolygons(vertices, polygons), bvh_index
+        # self.bvh_tree = BVHTree.FromPolygons(vertices, polygons)
+        # self.bvh_tree_index = bvh_index
 
     def build(self, context, dstCRS, elevObj, separate:bool, build_parameters: dict = {}):
         prefs = context.preferences.addons[PKG].preferences
