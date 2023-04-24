@@ -50,7 +50,7 @@ class RayCastHit():
 		loc = kwargs.get('loc', None)
 		faceIdx = kwargs.get('faceIdx', None)
 		dst = kwargs.get('dst', None)
-		self.originating_node_ids = kwargs('originates_from', [])
+		self.originating_node_ids = kwargs.get('originates_from', [])
 
 class DropToGround():
 	'''A class to perform raycasting accross z axis'''
