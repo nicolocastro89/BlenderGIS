@@ -204,6 +204,9 @@ class OSMRelation(OSMElement):
             member_element.preprocess_instance()
             self.members[member_element._id].element = member_element
         
+        if any(m.element is None for m in self.members.values()):
+            self.is_valid = False
+            return
         for node in self.nodes:
             node.add_referenced_from(self.__class__, self._id)
 
@@ -239,7 +242,7 @@ class OSMMultipolygon(object):
     def is_closed(self) -> bool:
         if not self.is_ordered:
             self.order()
-        return self.ways[0].get_nodes()[0] == self.ways[-1].get_nodes()[-1]
+        return self.ways[0]._node_ids[0] == self.ways[-1]._node_ids[-1]
 
     def end_points(self)->list(OSMNode):
         if len(self.ways)== 0 or self.is_closed():
@@ -384,15 +387,14 @@ class OSMMultiPolygonRelation(OSMRelation):
                     self.polygons.append(
                         OSMMultipolygon(role=member.role, ways=[member.element]))
         # Iterate to merge polygons
-        while any(p.is_closed() for p in self.polygons):
-            open = next((p for p in self.polygons if not p.is_closed()),None)
-            if open is None:
-                break
-            attach_to = next((p for p in self.polygons if p.can_extend(open) ),None)
+        open = next((p for p in self.polygons if not p.is_closed()),None)
+        while open:
+            attach_to = next((p for p in self.polygons if p.can_extend(open, open.role) ),None)
             if attach_to is None:
-                raise Exception("Open Polygon could not be closed")
+                raise Exception(f"Open Polygon {open} could not be closed")
             self.polygons.remove(open)
             attach_to.extend(open)
+            open = next((p for p in self.polygons if not p.is_closed()),None)
 
 class OSMBuildingRelation(OSMRelation, OSMBuilding):
     ''' A building relation is a special relation which serves to define a complex building

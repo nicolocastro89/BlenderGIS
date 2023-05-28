@@ -42,6 +42,25 @@ class OSMWay(OSMElement):
     def is_closed(self) -> bool:
         return self._node_ids[0] == self._node_ids[-1]
 
+    @property
+    def previous_ways(self) -> list[T]:
+        previous = []
+        if not self.is_closed:
+            node = self.nodes[0]
+            referenced_ways  = node._referenced_by[T]
+            previous = [w for w in referenced_ways if w._id != self._id]
+
+        return previous
+    
+    @property
+    def following_ways(self) -> list[T]:
+        next = []
+        if not self.is_closed:
+            node = self.nodes[-1]
+            referenced_ways  = node._referenced_by[T]
+            next = [w for w in referenced_ways if w._id != self._id]
+        return next
+
     @classmethod
     def is_valid(cls, element) -> bool:
         return super(OSMWay, cls).is_valid(element)

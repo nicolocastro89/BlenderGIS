@@ -161,6 +161,7 @@ class OSM_IMPORT():
 
 	buildingsExtrusion: BoolProperty(name='Buildings extrusion', description='', default=True)
 	defaultHeight: FloatProperty(name='Default Height', description='Set the height value using for extrude building when the tag is missing', default=20)
+	defaultRoofHeight: FloatProperty(name='Default Roof Height', description='Set the height value using for extrude roof when the tag is missing', default=5)
 	levelHeight: FloatProperty(name='Level height', description='Set a height for a building level, using for compute extrude height based on number of levels', default=3)
 	randomHeightThreshold: FloatProperty(name='Random height threshold', description='Threshold value for randomize default height', default=0)
 
@@ -169,6 +170,7 @@ class OSM_IMPORT():
 	def get_build_params(self):
 		return {
 			'default_height':self.defaultHeight,
+			'default_roof_height':self.defaultRoofHeight,
 			'random_height_threshold': self.randomHeightThreshold,
 			'level_height': self.levelHeight,
 			'highway_subdivision_size': 5
@@ -686,9 +688,9 @@ class IMPORTGIS_OT_osm_query(Operator, OSM_IMPORT):
 			self.report({'ERROR'}, "Please define the query extent in orthographic top view or by selecting a reference object")
 			return {'CANCELLED'}
 
-		if bbox.dimensions.x > 20000 or bbox.dimensions.y > 20000:
-			self.report({'ERROR'}, "Too large extent")
-			return {'CANCELLED'}
+		# if bbox.dimensions.x > 20000 or bbox.dimensions.y > 20000:
+		# 	self.report({'ERROR'}, "Too large extent")
+		# 	return {'CANCELLED'}
 
 		#Get view3d bbox in lonlat
 		bbox = reprojBbox(geoscn.crs, 4326, bbox)

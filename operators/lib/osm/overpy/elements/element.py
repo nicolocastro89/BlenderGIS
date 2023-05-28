@@ -1,4 +1,6 @@
 from __future__ import annotations
+import cProfile, pstats, io
+from pstats import SortKey
 import pprint
 from typing import ClassVar, TypeVar
 from abc import ABC, abstractclassmethod, abstractmethod
@@ -31,7 +33,7 @@ class OSMElement(ABC):
     _is_preprocessed: bool = False
     _is_built: bool = False
 
-    _referenced_by: dict[type, set[int]]
+    _referenced_by: dict[type, set[int]] = {}
 
     @property
     def references(self):
@@ -125,10 +127,19 @@ class OSMElement(ABC):
 
     @classmethod
     def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={}) -> None:
+        pr = cProfile.Profile()
+        pr.enable()
         for part in library.get_elements(cls).values():
             if part.is_built:
                 continue
             part.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)
+        pr.disable()
+        s = io.StringIO()
+        sortby = SortKey.CUMULATIVE
+        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+        ps.print_stats()
+        print(f'Profile of {cls} building')
+        print(s.getvalue())
         return
     
     def build_instance(self, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={}) -> bpy.types.Object|None:

@@ -9,7 +9,7 @@ from .....core.proj.reproj import Reproj, reprojBbox, reprojPt, UTM
 from .....geoscene import GeoScene
 import logging
 from .elements import ElementFactory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Type
 if TYPE_CHECKING:
     from .elements import T, OSMNode, OSMElement, OSMRelation, OSMWay, OSMBuilding
 
@@ -63,15 +63,28 @@ class OSMLibrary(object):
     _class_collection_map: dict[T, OrderedDict[str, OSMElement]] = {}
     _bounds: BoundingBox
 
+    _bvh_trees: dict[str,'BVHTree'] = {}
+    _bvh_trees_index: dict[str,'list["int"]'] = {}
     _bvh_tree: 'BVHTree' = None
-    _bvh_tree_index: 'list["int"]'
+    _bvh_tree_index: 'list["int"]' = None
 
     _processed: bool
     reprojector: Reproj = None
 
+    def get_bvh_tree(self, element_type)->tuple['BVHTree',list[int]]:
+        tree = self._bvh_trees.get(element_type, None)
+        tree_index = self._bvh_trees_index.get(element_type, None)
+        if tree is None:
+            (tree, tree_index) = self.create_bvh_tree(element_type=element_type)
+            self._bvh_trees[element_type] = tree
+            self._bvh_trees_index[element_type] = tree_index
+
+        return (tree, tree_index)
+    
     @property
     def bvh_tree(self)->'BVHTree':
         if self._bvh_tree is None:
+           from .elements import T, OSMNode, OSMElement, OSMRelation, OSMWay, OSMBuilding
            self._bvh_tree,  self._bvh_tree_index = self.create_bvh_tree(self.reprojector, OSMBuilding)
         return self._bvh_tree
 
@@ -82,6 +95,7 @@ class OSMLibrary(object):
     @property
     def bvh_tree_index(self)->'list["int"]':
         if self._bvh_tree_index is None:
+           from .elements import T, OSMNode, OSMElement, OSMRelation, OSMWay, OSMBuilding
            self.create_bvh_tree(self.reprojector, OSMBuilding)
         return self._bvh_tree_index
 
@@ -194,16 +208,16 @@ class OSMLibrary(object):
 
         return
 
-    def create_bvh_tree(self, reprojector: Reproj, element_type)->tuple['BVHTree',list[int]]:
+    def create_bvh_tree(self, reprojector: Reproj = None, element_type=None)->tuple['BVHTree',list[int]]:
         from mathutils.bvhtree import BVHTree
         from .elements import OSMBuilding
-
+        element_type = element_type if element_type is not None else OSMBuilding
         vertices = []
         polygons = []
         polygon_start = 0
         polygon_end = 0
         bvh_index = []
-        for idx, building in self.get_elements(OSMBuilding).items():
+        for idx, building in self.get_elements(element_type).items():
             if reprojector:
                 nodes = reprojector.pts([n._lat, n._lon]
                                     for n in building.get_nodes()[:-1])

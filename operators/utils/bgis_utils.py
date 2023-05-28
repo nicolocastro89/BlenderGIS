@@ -1,4 +1,8 @@
 from __future__ import annotations
+import collections
+import itertools
+import math
+from numbers import Number
 import bpy
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
@@ -6,6 +10,10 @@ from bpy_extras.view3d_utils import region_2d_to_location_3d, region_2d_to_vecto
 
 from ...core import BBOX
 
+def all_subclasses(cls):
+	return set(cls.__subclasses__()).union(
+		[s for c in cls.__subclasses__() for s in all_subclasses(c)]
+	)
 def isTopView(context):
 	if context.area.type == 'VIEW_3D':
 		reg3d = context.region_data
@@ -170,6 +178,64 @@ def addTexture(mat, img, uvLay, name='texture'):
 	node_tree.links.new(textureNode.outputs['Color'] , diffuseNode.inputs['Base Color'])#diffuseNode.inputs['Color'])
 	node_tree.links.new(diffuseNode.outputs['BSDF'] , outputNode.inputs['Surface'])
 
+def parse_measurement(value:str):
+	value.replace(',', '.')
+	try:
+		parsed_value = int(value)
+	except:
+		try:
+			parsed_value = float(value)
+		except:
+			for i, c in enumerate(value):
+				if not c.isdigit():
+					try:
+						parsed_value, unit = float(value[:i]), value[i:].strip()
+						#todo : parse unit  25, 25m, 25 ft, etc.
+					except:
+						parsed_value = None
+	return parsed_value
+
+def remove_straight_angles(vertices:list[Vector], straight_angle_threshold:Number = None)->list[Vector]:
+	straight_angle_threshold = straight_angle_threshold or 4.5
+	straight_angle_tan = math.tan(math.radians( abs(straight_angle_threshold) ))
+	"""
+	Given <verts> constituting a polygon, removes vertices forming a straight angle
+	"""
+	if len(vertices)<3:
+		return vertices[:]
+	
+	result = []
+	vertices_queue = collections.deque(vertices)
+	vertices_queue.rotate(1) #start comparing the fist node
+	for i in range(len(vertices)):
+		first = vertices_queue[0]
+		middle = vertices_queue[1]
+		last = vertices_queue[2]
+
+		u1_x = middle.x-first.x
+		u1_y = middle.y-first.y
+
+		u2_x = last.x-middle.x
+		u2_y = last.y-middle.y
+
+		dot = u1_x*u2_x + u1_y*u2_y
+		# cross = u1_x*u2_y - u1_y*u2_x possibly not useful if the dot product is 0
+
+		if dot and abs((u1_x*u2_y - u1_y*u2_x)/dot) >= straight_angle_tan:
+			result.append(vertices[i])
+		vertices_queue.rotate(-1)
+
+	return result
+	
+def find_geometric_center(vertices:list[Vector])->Vector:
+	if len(vertices)==1:
+		return vertices[0]
+	return sum(vertices, Vector((0,0,0)))/len(vertices)
+
+def find_longest_direction(vertices:list[Vector]):
+	vertices_shifted = itertools.cycle(vertices)
+	next(vertices_shifted)
+	return max(v[1]-v[0] for v in zip(vertices, vertices_shifted))
 
 class getBBOX():
 

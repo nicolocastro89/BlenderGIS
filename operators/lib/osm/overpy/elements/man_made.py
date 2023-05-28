@@ -1,7 +1,7 @@
 from __future__ import annotations
 import pprint
 import random
-from typing import ClassVar, TypeVar
+from typing import Any, ClassVar, TypeVar
 from xml.etree.ElementTree import Element
 
 from .....utils.bgis_utils import DropToGround
@@ -27,7 +27,6 @@ zAxis = Vector((0., 0., 1.))
 
 
 T = TypeVar('T', bound='OSMManMade')
-
 
 class OSMManMade(OSMWay):
     '''A tag for identifying man-made (artificial) structures added to the landscape
@@ -123,7 +122,7 @@ class OSMBridge(OSMManMade):
 
         free_node = None
         for node in self._nodes:
-            referenced_by = node.get_referenced_from().get(OSMBuilding,set())
+            referenced_by = node.get_referenced_from().get(OSMHighway,set())
             if node._id in referenced_by:
                 for ref in referenced_by:
                     shared_by[ref] = shared_by.get(ref, 0) + 1
@@ -158,12 +157,14 @@ class OSMBridge(OSMManMade):
             if len(candidates) == 1:
                 self._library.get_element_by_id(candidates[0]).add_part(self)
             
-
+    def build_instance(self, geoscn, reproject, ray_caster: DropToGround = None, build_parameters: dict = {}) -> Any | None:
+        return 
+    
     def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
         verts = self.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
         
-        z_heights = sorted([v.co(2) for v in verts])
-        bmesh.ops.translate(bm, verts=verts, vec=(0, 0, min_height))
+        
+        
         face = bm.faces.new(verts)
         #ensure face is up (anticlockwise order)
         #because in OSM there is no particular order for closed ways
@@ -171,37 +172,8 @@ class OSMBridge(OSMManMade):
         if face.normal.z < 0:
             face.normal_flip()
 
-        offset = None
-        if "height" in self._tags:
-                htag = self._tags["height"]
-                htag.replace(',', '.')
-                try:
-                    offset = int(htag)
-                except:
-                    try:
-                        offset = float(htag)
-                    except:
-                        for i, c in enumerate(htag):
-                            if not c.isdigit():
-                                try:
-                                    offset, unit = float(htag[:i]), htag[i:].strip()
-                                    #todo : parse unit  25, 25m, 25 ft, etc.
-                                except:
-                                    offset = None
-        elif "building:levels" in self._tags:
-            try:
-                offset = int(self._tags["building:levels"]) * build_parameters.get('level_height',3)
-            except ValueError as e:
-                offset = None
-
-        if offset is None:
-            minH = build_parameters.get('default_height', 30) - build_parameters.get('random_height_threshold', 15)
-            if minH < 0 :
-                minH = 0
-            maxH = build_parameters.get('default_height', 30) + build_parameters.get('random_height_threshold', 15)
-            offset = random.randint(minH, maxH)
-
-        offset -=min_height
+        offset = build_parameters.get('bridge_height', 5)
+        
         #Extrude
         
         if build_parameters.get('extrusion_axis', 'Z') == 'NORMAL':
@@ -219,6 +191,7 @@ class OSMBridge(OSMManMade):
                 v.co.z = z
         else:
             bmesh.ops.translate(bm, verts=verts, vec=vect)
+
 
         return bm
     

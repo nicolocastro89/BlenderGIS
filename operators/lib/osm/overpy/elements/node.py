@@ -7,6 +7,7 @@ from .element import OSMElement
 from xml.etree.ElementTree import Element
 from ......core.proj import Reproj
 from typing import TYPE_CHECKING
+from .....utils.bgis_utils import DropToGround
 if TYPE_CHECKING:
     from ..OSMLibrary import OSMLibrary
 
@@ -26,7 +27,6 @@ class OSMNode(OSMElement):
     _lon:Num
     _ele:Num
 
-    
     def __str__(self):
         return f"OSMNode with id: {self._id} located at Lon:{self._lon}, Lat{self._lat} and tags:\n{pprint.pformat(self._tags)}"
     
@@ -90,12 +90,6 @@ class OSMNode(OSMElement):
     def get_referenced_from(self):
         return self._referenced_by
     
-    def get_position_in_3d_world(self, reproj: Reproj):
-        result = {
-            'point':reproj.pt(self._lon, self._lat),
-            'node_id':self._id
-        }
-
-        return result
+    
 
 
