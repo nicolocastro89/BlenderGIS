@@ -144,8 +144,8 @@ class OSMRelation(OSMElement):
         return
 
     @classmethod
-    def is_valid(cls, element) -> bool:
-        return super(OSMRelation, cls).is_valid(element)
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMRelation, cls).is_valid_data(element)
 
     @classmethod
     def is_valid_xml(cls, xml_element: Element) -> bool:
@@ -191,7 +191,7 @@ class OSMRelation(OSMElement):
             list(self._library.get_elements(OSMNode, self._node_ids).values())
         return self._nodes
     
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the relationship. Does the following in order:
         - Find and store a reference to all members part of the relationship
         - Preprocess it
@@ -201,11 +201,11 @@ class OSMRelation(OSMElement):
             return
         member_elements = self._library.get_elements_by_ids(list(self.members.keys()))
         for member_element in member_elements:
-            member_element.preprocess_instance()
+            member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
         
         if any(m.element is None for m in self.members.values()):
-            self.is_valid = False
+            self._is_valid = False
             return
         for node in self.nodes:
             node.add_referenced_from(self.__class__, self._id)
@@ -341,10 +341,10 @@ class OSMMultiPolygonRelation(OSMRelation):
         return
 
     @classmethod
-    def is_valid(cls, element) -> bool:
-        return super(OSMMultiPolygonRelation, cls).is_valid(element)
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMMultiPolygonRelation, cls).is_valid_data(element)
 
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the relationship. Does the following in order:
         - Find and store a reference to all members part of the relationship
         - Group ways in multipolygons and divide them in inner and outer
@@ -354,8 +354,12 @@ class OSMMultiPolygonRelation(OSMRelation):
         
         member_elements = self._library.get_elements_by_ids(list(self.members.keys()))
         for member_element in member_elements:
-            member_element.preprocess_instance()
+            member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
+
+        if any(m.element is None for m in self.members.values()):
+            self._is_valid = False
+            return
         
         for node in self.get_nodes():
             node.add_referenced_from(self.__class__, self._id)
@@ -414,7 +418,7 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
         return
 
 
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the relationship. Does the following in order:
         - Adding a reference to the relation in all nodes referenced
         - Find and store a reference to all members part of the relationship
@@ -426,8 +430,12 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
         
         member_elements = self._library.get_elements_by_ids(list(self.members.keys()))
         for member_element in member_elements:
-            member_element.preprocess_instance()
+            member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
+
+        if any(m.element is None for m in self.members.values()):
+            self._is_valid = False
+            return
         
         for node in self.get_nodes():
             node.add_referenced_from(self.__class__, self._id)
@@ -589,8 +597,8 @@ class OSMMultiPolygonBuildingRelation(OSMMultiPolygonRelation, OSMBuildingRelati
         return
 
     @classmethod
-    def is_valid(cls, element) -> bool:
-        return super(OSMMultiPolygonBuildingRelation, cls).is_valid(element)
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMMultiPolygonBuildingRelation, cls).is_valid_data(element)
 
     @classmethod
     def is_valid_xml(cls, xml_element: Element) -> bool:
@@ -703,8 +711,8 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
         return
 
     @classmethod
-    def is_valid(cls, element) -> bool:
-        return super(OSMMultiPolygonBuildingPartRelation, cls).is_valid(element)
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMMultiPolygonBuildingPartRelation, cls).is_valid_data(element)
 
     @classmethod
     def is_valid_xml(cls, xml_element: Element) -> bool:
@@ -719,7 +727,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
                      cls).is_valid_json(json_element) and json_element.get(
                          'tags', {}).get('type', None) == cls._osm_relation_type
 
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the relationship. Does the following in order:
         - Find and store a reference to all members part of the relationship
         - Find the outline way
@@ -730,8 +738,12 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
         
         member_elements = self._library.get_elements_by_ids(list(self.members.keys()))
         for member_element in member_elements:
-            member_element.preprocess_instance()
+            member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
+            
+        if any(m.element is None for m in self.members.values()):
+            self._is_valid = False
+            return
         
         for node in self.get_nodes():
             node.add_referenced_from(self.__class__, self._id)
@@ -767,7 +779,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
                     shared_by[ref] = shared_by.get(ref, 0) + 1
             else:
                 if free_node is None:
-                    free_node = node._id
+                    free_node = node
         
         # Find the building parts with the most candidates
         max_references = max((len(s) for s in shared_by.values()), default = None)
@@ -783,10 +795,10 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
                 # Take the first encountered free node <freeNode> and
                 # calculated if it is located inside any building from <self.buildings>
                 bvhTree = self._library.bvh_tree
-                coords = next(n for n in self._nodes if n._id == free_node)
+                p = (node.ray_cast_hit.loc[0], node.ray_cast_hit.loc[1]) if node.ray_cast_hit else self._library.reprojector.pt([(node._lat, node._lon)])
                 # Cast a ray from the point with horizontal coords equal to <coords> and
                 # z = -1. in the direction of <zAxis>
-                buildingIndex = bvhTree.ray_cast((coords._lat, coords._lon, -1.), zAxis)[2]
+                buildingIndex = bvhTree.ray_cast((p[0], p[1], -1.), zAxis)[2]
                 if buildingIndex is not None:
                     # we consider that <part> is located inside <buildings[buildingIndex]>
                     self._library.get_element_by_id(self._library.bvh_tree_index[buildingIndex]).add_part(self)

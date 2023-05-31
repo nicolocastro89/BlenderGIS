@@ -89,7 +89,7 @@ class OSMBridge(OSMManMade):
         super(OSMBridge,self).__init__(**kwargs)
 
 
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """
         """
         if self._is_preprocessed:

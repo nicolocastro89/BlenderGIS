@@ -7,7 +7,7 @@ from .element import OSMElement
 from xml.etree.ElementTree import Element
 from ......core.proj import Reproj
 from typing import TYPE_CHECKING
-from .....utils.bgis_utils import DropToGround
+from .....utils.bgis_utils import DropToGround, RayCastHit
 if TYPE_CHECKING:
     from ..OSMLibrary import OSMLibrary
 
@@ -27,6 +27,8 @@ class OSMNode(OSMElement):
     _lon:Num
     _ele:Num
 
+    ray_cast_hit:RayCastHit
+
     def __str__(self):
         return f"OSMNode with id: {self._id} located at Lon:{self._lon}, Lat{self._lat} and tags:\n{pprint.pformat(self._tags)}"
     
@@ -39,8 +41,8 @@ class OSMNode(OSMElement):
         return 
 
     @classmethod
-    def is_valid(cls, element) -> bool:
-        return super(OSMNode, cls).is_valid(element)
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMNode, cls).is_valid_data(element)
 
     @classmethod
     def is_valid_xml(cls, xml_element: Element) -> bool:
@@ -77,6 +79,23 @@ class OSMNode(OSMElement):
     def nodes(self)->list[OSMNode]:
         return [self]
     
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
+        """Preprocess the way by doing the following in order:
+        - Adding a reference to the way in all nodes referenced
+        """
+        if self._is_preprocessed:
+            return
+        
+        pt = self._library.reprojector.pt(float(self._lon), float(self._lat))
+        dx, dy = geoscn.crsx, geoscn.crsy
+
+        if ray_caster:
+            self.ray_cast_hit = ray_caster.rayCast(pt[0]-dx, pt[1]-dy) 
+            
+        else:
+            self.ray_cast_hit = RayCastHit(loc = (pt[0]-dx, pt[1]-dy, 0))
+                                
+        
     @classmethod
     def _create_init_dict_from_json(cls, json_element: dict)->dict:
         return super(OSMNode, cls)._create_init_dict_from_json(json_element=json_element)

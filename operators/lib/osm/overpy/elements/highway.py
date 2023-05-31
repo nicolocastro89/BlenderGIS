@@ -176,22 +176,22 @@ class OSMHighway(OSMWay):
         return HighwayContinuation(first_referenced, last_referenced)
 
     @classmethod
-    def preprocess(cls, library: OSMLibrary):
+    def preprocess(cls, library: OSMLibrary, ray_caster:DropToGround):
         from .man_made import OSMBridge
         highways = library.get_elements(cls).values()
         for part in highways:
-            part.preprocess_instance()
+            part.preprocess_instance(geoscn = library.geo_scene, ray_caster=ray_caster)
 
     
   
 
-    def preprocess_instance(self):#, bridges: tuple['BVHTree',list[int]]
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):#, bridges: tuple['BVHTree',list[int]]
         """Preprocess the highway by doing the following in order:
         - Adding a reference to the highway in all nodes referenced
         - add references to before and after highways"""
         #from .man_made import OSMBridge
         self._is_preprocessed = False
-        super(OSMHighway,self).preprocess_instance()
+        super(OSMHighway,self).preprocess_instance(geoscn, ray_caster)
         self.find_assigned_bridges()
         
         self._is_preprocessed = True
@@ -217,7 +217,7 @@ class OSMHighway(OSMWay):
         pr = cProfile.Profile()
         pr.enable()
         for part in highways:
-            if part.is_built:
+            if part.is_built or not part._is_valid:
                 continue
 
             bm = meshes.setdefault(part.highway_type, bmesh.new())

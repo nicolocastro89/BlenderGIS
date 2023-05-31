@@ -619,8 +619,20 @@ class IMPORTGIS_OT_osm_file(Operator, OSM_IMPORT):
 					self.report({'ERROR'}, "There is no elevation object in the scene to get elevation from")
 					return {'FINISHED'}
 			elevObj = scn.objects[int(self.objElevLst)] if self.useElevObj else None
-			result.preprocess()
-			result.build(context, dstCRS = geoscn.crs, elevObj = elevObj, separate = self.separate, build_parameters=build_parameters)
+			result.geo_scene = geoscn
+			try:
+				rprj = Reproj(4326, geoscn.crs)
+				result.reprojector = rprj
+			except Exception as e:
+				log.error('Unable to reproject data', exc_info=True)
+				self.report({'ERROR'},
+							"Unable to reproject data ckeck logs for more infos")
+				return {'FINISHED'}
+
+			ray_caster = DropToGround(scn, elevObj) if elevObj else None
+		
+			result.preprocess(ray_caster=ray_caster)
+			result.build(context, ray_caster=ray_caster, separate = self.separate, build_parameters=build_parameters)
 
 		bbox = getBBOX.fromScn(scn)
 		adjust3Dview(context, bbox, zoomToSelect=False)

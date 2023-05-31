@@ -179,7 +179,7 @@ class OSMBuildingPart(OSMBuilding):
     def is_valid_json(cls, json_element) -> bool:
         return super(OSMBuildingPart, cls).is_valid_json(json_element) and cls._osm_sub_name in json_element.get('tags',{})
 
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the building part. Does the following in order:
         - Adding a reference to the way in all nodes referenced
         - Find the parent element of the building part
@@ -219,7 +219,7 @@ class OSMBuildingPart(OSMBuilding):
                     shared_by[ref] = shared_by.get(ref, 0) + 1
             else:
                 if free_node is None:
-                    free_node = node._id
+                    free_node = node
         
         # Find the building parts with the most candidates
         max_references = max((len(s) for s in shared_by.values()), default = None)
@@ -235,10 +235,10 @@ class OSMBuildingPart(OSMBuilding):
                 # Take the first encountered free node <freeNode> and
                 # calculated if it is located inside any building from <self.buildings>
                 bvhTree = self._library.bvh_tree
-                coords = next(n for n in self._nodes if n._id == free_node)
+                p = self._library.reprojector.pt(node._lat, node._lon)
                 # Cast a ray from the point with horizontal coords equal to <coords> and
                 # z = -1. in the direction of <zAxis>
-                buildingIndex = bvhTree.ray_cast((coords._lat, coords._lon, -1.), zAxis)[2]
+                buildingIndex = bvhTree.ray_cast((p[0], p[1], -1.), zAxis)[2]
                 if buildingIndex is not None:
                     # we consider that <part> is located inside <buildings[buildingIndex]>
                     self._library.get_element_by_id(self._library.bvh_tree_index[buildingIndex]).add_part(self)
@@ -736,9 +736,11 @@ class OSMDomedRoof(OSMRoof):
                 'faces':faces}
     
     def _build_ridge(self,bm, first_vertex, center):
-        direction = center.co-first_vertex.co
+        direction = first_vertex.co - center.co
+        direction.z = - direction.z
         vertices = [first_vertex]
-        vertices.extend(bm.verts.new(first_vertex.co+Vector((direction.x*s[0],direction.y*s[0],direction.z*s[1]))) for s in self.steps)
+        height = center.co.z-first_vertex.co.z
+        vertices.extend(bm.verts.new(center.co+Vector((direction.x*s[0],direction.y*s[0],direction.z*s[1]-height))) for s in self.steps)
 
         edges = [bm.edges.new(v) for v in zip(vertices[:-1],vertices[1:])]
         edges.append(bm.edges.new((vertices[-1], center)))

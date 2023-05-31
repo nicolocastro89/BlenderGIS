@@ -3,6 +3,7 @@ import collections
 import itertools
 import math
 from numbers import Number
+import time
 import bpy
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree

@@ -201,9 +201,9 @@ class OSMLibrary(object):
     def get_relation_ids(self):
         return self.get_ids(filter_cls=OSMRelation)
 
-    def preprocess(self):
+    def preprocess(self, ray_caster:DropToGround):
         for element_types in self._class_collection_map.keys():
-            element_types.preprocess(self)
+            element_types.preprocess(self, ray_caster = ray_caster)
         self.bvh_tree = None
 
         return
@@ -219,8 +219,8 @@ class OSMLibrary(object):
         bvh_index = []
         for idx, building in self.get_elements(element_type).items():
             if reprojector:
-                nodes = reprojector.pts([n._lat, n._lon]
-                                    for n in building.get_nodes()[:-1])
+                nodes = [(p[0],p[1],0) for p in reprojector.pts([[n._lat, n._lon]
+                                    for n in building.get_nodes()[:-1]])]
             else:
                 nodes =[(n._lat, n._lon, 0) for n in building.get_nodes()[:-1]]
             # In the case of a multipolygon we consider the only outer linestring that defines the outline
@@ -237,23 +237,12 @@ class OSMLibrary(object):
         # self.bvh_tree = BVHTree.FromPolygons(vertices, polygons)
         # self.bvh_tree_index = bvh_index
 
-    def build(self, context, dstCRS, elevObj, separate:bool, build_parameters: dict = {}):
+    def build(self, context, ray_caster:DropToGround, separate:bool, build_parameters: dict = {}):
         prefs = context.preferences.addons[PKG].preferences
         scn = context.scene
         geoscn = GeoScene(scn)
         scale = geoscn.scale  #TODO
 
-        #Init reprojector class
-        try:
-            rprj = Reproj(4326, dstCRS)
-            self.reprojector = rprj
-        except Exception as e:
-            log.error('Unable to reproject data', exc_info=True)
-            self.report({'ERROR'},
-                        "Unable to reproject data ckeck logs for more infos")
-            return {'FINISHED'}
-
-        ray_caster = DropToGround(scn, elevObj) if elevObj else None
 
         bmeshes = {}
         vgroupsObj = {}
@@ -265,7 +254,7 @@ class OSMLibrary(object):
         for element_type in self._class_collection_map.keys():
             element_type.build(self, 
                                geoscn = geoscn, 
-                               reproject = rprj, 
+                               reproject = self.reprojector, 
                                ray_caster = ray_caster, 
                                build_parameters = build_parameters)
         return

@@ -62,8 +62,8 @@ class OSMWay(OSMElement):
         return next
 
     @classmethod
-    def is_valid(cls, element) -> bool:
-        return super(OSMWay, cls).is_valid(element)
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMWay, cls).is_valid_data(element)
 
     @classmethod
     def is_valid_xml(cls, xml_element) -> bool:
@@ -113,7 +113,7 @@ class OSMWay(OSMElement):
             raise IndexError
         return (self._nodes[0], self._nodes[-1])
 
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the way by doing the following in order:
         - Adding a reference to the way in all nodes referenced
         """
@@ -128,24 +128,33 @@ class OSMWay(OSMElement):
             node.add_referenced_from(self.__class__, self._id)
 
     def get_points(self, geoscn, reproject, ray_caster: DropToGround = None)->"list":
-        pts = [(float(node._lon), float(node._lat)) for node in self.nodes]
-        pts = reproject.pts(pts)
-        dx, dy = geoscn.crsx, geoscn.crsy
+        hits = [node.ray_cast_hit for node in self.nodes] 
+        if not all(hits) and any(hits):
+            zs = [p.loc.z for p in hits if p.hit]
+            meanZ = sum(zs) / len(zs)
+            for v in hits:
+                if not v.hit:
+                    v.loc.z = meanZ
+        pts = [pt.loc for pt in hits]
+        return pts 
+        # pts = [(float(node._lon), float(node._lat)) for node in self.nodes]
+        # pts = reproject.pts(pts)
+        # dx, dy = geoscn.crsx, geoscn.crsy
 
-        if ray_caster:
-            pts = [ray_caster.rayCast(v[0]-dx, v[1]-dy) for v in pts]
-            hits = [pt.hit for pt in pts]
-            if not all(hits) and any(hits):
-                zs = [p.loc.z for p in pts if p.hit]
-                meanZ = sum(zs) / len(zs)
-                for v in pts:
-                    if not v.hit:
-                        v.loc.z = meanZ
-            pts = [pt.loc for pt in pts]
-        else:
-            pts = [ (v[0]-dx, v[1]-dy, 0) for v in pts]
+        # if ray_caster:
+        #     pts = [ray_caster.rayCast(v[0]-dx, v[1]-dy) for v in pts]
+        #     hits = [pt.hit for pt in pts]
+        #     if not all(hits) and any(hits):
+        #         zs = [p.loc.z for p in pts if p.hit]
+        #         meanZ = sum(zs) / len(zs)
+        #         for v in pts:
+        #             if not v.hit:
+        #                 v.loc.z = meanZ
+        #     pts = [pt.loc for pt in pts]
+        # else:
+        #     pts = [ (v[0]-dx, v[1]-dy, 0) for v in pts]
                                 
-        return pts
+        # return pts
     
     def get_vertices(self, bm, geoscn, reproject, ray_caster: DropToGround = None)->"list":
         pts = self.get_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)

@@ -65,7 +65,7 @@ class OSMElement(ABC):
         return
 
     @classmethod
-    def is_valid(cls, element) -> bool:
+    def is_valid_data(cls, element) -> bool:
         if isinstance(element, dict) and cls.is_valid_json(element):
             return cls.is_valid_json(element)
         if isinstance(element, Element) and cls.is_valid_xml(element):
@@ -116,11 +116,11 @@ class OSMElement(ABC):
         return json_element
 
     @classmethod
-    def preprocess(cls, library: OSMLibrary):
+    def preprocess(cls, library: OSMLibrary, ray_caster:DropToGround):
         for part in library.get_elements(cls).values():
-            part.preprocess_instance()
+            part.preprocess_instance(geoscn = library.geo_scene, ray_caster=ray_caster)
     
-    def preprocess_instance(self):
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
         """Preprocess the element. Empty method"""
         self._is_preprocessed = True
         return
@@ -130,7 +130,7 @@ class OSMElement(ABC):
         pr = cProfile.Profile()
         pr.enable()
         for part in library.get_elements(cls).values():
-            if part.is_built:
+            if part.is_built or not part._is_valid:
                 continue
             part.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)
         pr.disable()
