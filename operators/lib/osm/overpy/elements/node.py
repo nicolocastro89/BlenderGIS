@@ -34,11 +34,18 @@ class OSMNode(OSMElement):
     
     def __init__(self, **kwargs):
         super(OSMNode,self).__init__(**kwargs)
-        self._lat = kwargs['lat']
-        self._lon = kwargs['lon']
+        self._lat = kwargs.get('lat', None)
+        self._lon = kwargs.get('lon', None)
         self._ele = kwargs.get('ele', None)
         self._referenced_by = {}
         return 
+    
+    def merge(self, node: OSMNode):
+        super(OSMNode,self).merge(node)
+        self._lat = node._lat
+        self._lon = node._lon
+        self._ele = node._ele
+        self._referenced_by.update(node.reference)
 
     @classmethod
     def is_valid_data(cls, element) -> bool:
@@ -55,12 +62,23 @@ class OSMNode(OSMElement):
     @classmethod
     def load_from_xml(cls, library:OSMLibrary, xml_element) -> T:
         kwargs = cls._create_init_dict_from_xml(xml_element = xml_element)
-        return OSMNode(library=library, **kwargs)
+        existing_node = library.get_element_by_id(kwargs['id'])
+        node = OSMNode(library=library, **kwargs)
+        if existing_node:
+            existing_node.merge(node)
+            return existing_node
+        return node
+        
 
     @classmethod
     def load_from_json(cls, library:OSMLibrary, json_element) -> T:
         kwargs = cls._create_init_dict_from_json(json_element = json_element)
-        return OSMNode(library=library, **kwargs)
+        existing_node = library.get_element_by_id(kwargs['id'])
+        node = OSMNode(library=library, **kwargs)
+        if existing_node:
+            existing_node.merge(node)
+            return existing_node
+        return node
 
     @classmethod
     def _create_init_dict_from_xml(cls, xml_element: Element)->dict:
@@ -100,14 +118,7 @@ class OSMNode(OSMElement):
     def _create_init_dict_from_json(cls, json_element: dict)->dict:
         return super(OSMNode, cls)._create_init_dict_from_json(json_element=json_element)
 
-    def add_referenced_from(self, referencing_type: OSMElement, referencing_id:int):
-        if referencing_type in self._referenced_by:
-            self._referenced_by[referencing_type].add(referencing_id)
-        else:
-            self._referenced_by[referencing_type] = set([referencing_id])
     
-    def get_referenced_from(self):
-        return self._referenced_by
     
     
 

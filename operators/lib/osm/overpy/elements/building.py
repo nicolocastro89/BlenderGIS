@@ -11,6 +11,7 @@ from typing import ClassVar, Type, TypeVar
 from xml.etree.ElementTree import Element
 
 from .....utils.bgis_utils import DropToGround, all_subclasses, find_geometric_center, parse_measurement, remove_straight_angles, find_longest_direction
+from .....utils.straight_skeleton import straightSkeletonOfPolygon
 from .node import OSMNode
 from .way import OSMWay
 from .element import OSMElement
@@ -101,7 +102,7 @@ class OSMBuilding(OSMWay):
         #because in OSM there is no particular order for closed ways
         
         face.normal_update()
-        if face.normal.z < 0:
+        if face.normal.z > 0:
             face.normal_flip()
 
         building_height = None
@@ -203,50 +204,55 @@ class OSMBuildingPart(OSMBuilding):
             outline_id = relation.outline
             outline = self._library.get_element_by_id(outline_id)
             if isinstance(outline, OSMBuilding):
+                self.part_of = outline
                 outline.add_part(self)
             return
 
-
+        candidates = self.get_best_overlap(OSMBuilding, False)
+        for candidate in candidates:
+            outline = self._library.get_element_by_id(candidate)
+            outline.add_part(self)
+            self.part_of=outline
         # If no relation is found find the building which uses all/most of the nodes in the part 
         
-        shared_by = {} # Dictionary of building Ids and how many nodes are encompassed by it
+        # shared_by = {} # Dictionary of building Ids and how many nodes are encompassed by it
 
-        free_node = None
-        for node in self._nodes:
-            referenced_by = node.get_referenced_from().get(OSMBuilding,set())
-            if node._id in referenced_by:
-                for ref in referenced_by:
-                    shared_by[ref] = shared_by.get(ref, 0) + 1
-            else:
-                if free_node is None:
-                    free_node = node
+        # free_node = None
+        # for node in self._nodes:
+        #     referenced_by = node.get_referenced_from(OSMBuilding)
+        #     if node._id in referenced_by:
+        #         for ref in referenced_by:
+        #             shared_by[ref] = shared_by.get(ref, 0) + 1
+        #     else:
+        #         if free_node is None:
+        #             free_node = node
         
-        # Find the building parts with the most candidates
-        max_references = max((len(s) for s in shared_by.values()), default = None)
-        candidates = [b for b in shared_by.keys() if len(shared_by[b])==max_references] if max_references else []
+        # # Find the building parts with the most candidates
+        # max_references = max((len(s) for s in shared_by.values()), default = None)
+        # candidates = [b for b in shared_by.keys() if len(shared_by[b])==max_references] if max_references else []
 
-        # If not all nodes are withing a building check if the parts is ray cast within a building
-        if free_node:
-            if len(candidates) == 1:
-                # To save time we won't check if all free OSM nodes of <part>
-                # are located inside the building
-                self._library.get_element_by_id(candidates[0]).add_part(self)
-            else:
-                # Take the first encountered free node <freeNode> and
-                # calculated if it is located inside any building from <self.buildings>
-                bvhTree = self._library.bvh_tree
-                p = self._library.reprojector.pt(node._lat, node._lon)
-                # Cast a ray from the point with horizontal coords equal to <coords> and
-                # z = -1. in the direction of <zAxis>
-                buildingIndex = bvhTree.ray_cast((p[0], p[1], -1.), zAxis)[2]
-                if buildingIndex is not None:
-                    # we consider that <part> is located inside <buildings[buildingIndex]>
-                    self._library.get_element_by_id(self._library.bvh_tree_index[buildingIndex]).add_part(self)
-        else:
-            # all OSM nodes of <part> are used by one or more buildings from <self.buildings>
-            # the case numCandidates > 1 probably means some weird configuration, so skip that <part>
-            if len(candidates) == 1:
-                self._library.get_element_by_id(candidates[0]).add_part(self)
+        # # If not all nodes are withing a building check if the parts is ray cast within a building
+        # if free_node:
+        #     if len(candidates) == 1:
+        #         # To save time we won't check if all free OSM nodes of <part>
+        #         # are located inside the building
+        #         self._library.get_element_by_id(candidates[0]).add_part(self)
+        #     else:
+        #         # Take the first encountered free node <freeNode> and
+        #         # calculated if it is located inside any building from <self.buildings>
+        #         bvhTree = self._library.bvh_tree
+        #         p = self._library.reprojector.pt(node._lat, node._lon)
+        #         # Cast a ray from the point with horizontal coords equal to <coords> and
+        #         # z = -1. in the direction of <zAxis>
+        #         buildingIndex = bvhTree.ray_cast((p[0], p[1], -1.), zAxis)[2]
+        #         if buildingIndex is not None:
+        #             # we consider that <part> is located inside <buildings[buildingIndex]>
+        #             self._library.get_element_by_id(self._library.bvh_tree_index[buildingIndex]).add_part(self)
+        # else:
+        #     # all OSM nodes of <part> are used by one or more buildings from <self.buildings>
+        #     # the case numCandidates > 1 probably means some weird configuration, so skip that <part>
+        #     if len(candidates) == 1:
+        #         self._library.get_element_by_id(candidates[0]).add_part(self)
             
 
     def build(self, geoscn, reproject, ray_caster = None, build_parameters:dict = {}) -> None:
@@ -256,11 +262,15 @@ class OSMBuildingPart(OSMBuilding):
         return
 
     def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+        outline_points = self.part_of.get_points()
+        min_z = min(p[2] for p in outline_points)
         plant_verts = self.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
-
+        # min_z = min(p.co[2] for p in plant_verts)
         #This should only be useful for building parts
         min_height = float(self._tags['min_height']) if 'min_height' in self._tags else float(self._tags.get('min_level',0))*build_parameters.get('level_height',3)
-        bmesh.ops.translate(bm, verts=plant_verts, vec=(0, 0, min_height))
+        for p in plant_verts:
+            p.co.z=min_z+min_height
+        #bmesh.ops.translate(bm, verts=plant_verts, vec=(0, 0, min_z+min_height))
         
         #plant edges
         shifted_vert = itertools.cycle(plant_verts)
@@ -275,7 +285,7 @@ class OSMBuildingPart(OSMBuilding):
         #because in OSM there is no particular order for closed ways
         
         face.normal_update()
-        if face.normal.z < 0:
+        if face.normal.z > 0:
             face.normal_flip()
 
         building_height = None
@@ -327,7 +337,6 @@ class OSMBuildingPart(OSMBuilding):
         roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
         return bm
 
-    
 class OSMRoof():
     
     directions:ClassVar[Vector] = {
@@ -353,6 +362,14 @@ class OSMRoof():
 
     _element: OSMElement = None
 
+    def get_height(self, build_parameters:dict ={}, **kwargs):
+        height_tag = next((k for k in self.height_tags if k in kwargs),None)
+        if height_tag == 'roof:levels':
+            return self.kwargs[height_tag]*build_parameters.get('level_height',3)
+        if height_tag == 'roof:height':
+            return self.kwargs[height_tag]
+        return build_parameters.get('default_roof_height', 5)
+    
     @property
     def orientation(self)->str:
         return self._element._tags.get('roof:orientation', 'along')
@@ -483,9 +500,7 @@ class RidgedRoof(OSMRoof):
 
 
     def build_roof(self, bm, roof_verts:list[bmesh.types.BMVert], roof_edges:list[bmesh.types.BMEdge], build_parameters:dict={}, **kwargs):
-        height_tag = next((k for k in self.height_tags if k in kwargs),None)
-        height = kwargs[height_tag] if height_tag is not None else build_parameters.get('default_roof_height', 5)
-        
+        height = self.get_height(build_parameters=build_parameters, **kwargs)
 
         relative_positions = self.calculate_relative_positions([v.co for v in roof_verts])
 
@@ -595,7 +610,6 @@ class RidgedRoof(OSMRoof):
             if endpoints[0] <= normalized_position <= endpoints[1]:
                 self._ridge_segments[i].append(vertex)
 
-        
 class OSMFlatRoof(OSMRoof):
     roof_shape:ClassVar[str]='flat'
 
@@ -612,9 +626,8 @@ class OSMPyramidalRoof(OSMRoof):
         super().__init__(element)
 
     def build_roof(self, bm, roof_verts:list[bmesh.types.BMVert], roof_edges:list[bmesh.types.BMEdge], build_parameters:dict={}, **kwargs):
-        height_tag = next((k for k in self.height_tags if k in kwargs),None)
-        height = kwargs[height_tag] if height_tag is not None else build_parameters.get('default_roof_height', 5)
-        
+
+        height = self.get_height(build_parameters=build_parameters, **kwargs)
         minimal_points = remove_straight_angles([v.co for v in roof_verts])
 
         center = find_geometric_center(minimal_points)
@@ -679,11 +692,28 @@ class OSMRoundRoof(OSMRoof):
         super().__init__(element)
 
 class OSMHippedRoof(OSMRoof):
+    roof_shape:ClassVar[str]='hipped'
+
     def __init__(self, element:OSMElement) -> None:
         super().__init__(element)
 
+    def build_roof(self, bm, roof_verts:list[bmesh.types.BMVert], roof_edges:list[bmesh.types.BMEdge], build_parameters:dict={}, **kwargs):
+        dest_mesh = bpy.data.meshes.new("dest_mesh")
+        
+        height = self.get_height(build_parameters=build_parameters, **kwargs)
 
+        plane_matrix = straightSkeletonOfPolygon([v.co for v in roof_verts], dest_mesh, height=height, tollerance=0.0001)
+        dest_mesh.transform(plane_matrix)
 
+        # roof_level = min(v.co.z for v in roof_verts)
+        # if min(v.co.z for v in dest_mesh.vertices) < roof_level:
+        #     roof_level = min(v.co.z for v in roof_verts)
+        #     for v in (vert for vert in dest_mesh.vertices if vert.co[2]<roof_level):
+        #         v.co.z = roof_level + (roof_level-v.co.z)
+            
+        bm.from_mesh(dest_mesh)
+        # for f in bm.faces:
+        #     f.normal_update()
 
 
 class OSMDomedRoof(OSMRoof):
@@ -701,6 +731,11 @@ class OSMDomedRoof(OSMRoof):
             
         return self._steps
 
+    # def get_height(self, build_parameters: dict = {}, **kwargs):
+    #     height_tag = next((k for k in self.height_tags if k in kwargs),None)
+    #     if height_tag is not None:
+    #         return super().get_height(build_parameters, **kwargs)
+    #     return abs((center-roof_verts[0].co).length)
     
     def __init__(self, element:OSMElement) -> None:
         super().__init__(element)
@@ -712,7 +747,10 @@ class OSMDomedRoof(OSMRoof):
         center = find_geometric_center(minimal_points)
         
         height_tag = next((k for k in self.height_tags if k in kwargs),None)
-        height = kwargs[height_tag] if height_tag is not None else abs((center-roof_verts[0].co).length)
+        if height_tag is not None:
+            height = super().get_height(build_parameters, **kwargs)
+        else:
+            height = abs((center-roof_verts[0].co).length)
 
         center.z += height
 

@@ -57,6 +57,7 @@ DEFAULT_OVERPASS_SERVER =  [
 DEFAULT_OSM_TAGS = [
 	'building',
 	'building:part',
+	'man_made',
 	'highway',
 	'landuse',
 	'leisure',

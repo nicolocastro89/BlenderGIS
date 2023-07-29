@@ -56,7 +56,8 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 
 		#s,w,n,e <--> ymin,xmin,ymax,xmax
 		bboxStr = ','.join(map(str, bbox.toLatlon()))
-
+		if 'man_made' in tags and 'bridge:support' not in tags:
+			tags.append('bridge:support')
 		if not types:
 			#if no type filter is defined then just select all kind of type
 			types = ['node', 'way', 'relation']
@@ -80,7 +81,7 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 			union += '>;);'
 		#all relations (no filter tag applied)
 		if 'relation' in types or 'rel' in types:
-			union += 'relation;>;'
+			union += 'relation;' #>;
 		union += ')'
 
 		output = ';out;'
@@ -173,7 +174,7 @@ class OSM_IMPORT():
 			'default_roof_height':self.defaultRoofHeight,
 			'random_height_threshold': self.randomHeightThreshold,
 			'level_height': self.levelHeight,
-			'highway_subdivision_size': 5
+			'highway_subdivision_size': 20
 			#'extrusion_axis': self.extrusionAxis
 		}
 
@@ -736,8 +737,20 @@ class IMPORTGIS_OT_osm_query(Operator, OSM_IMPORT):
 					self.report({'ERROR'}, "There is no elevation object in the scene to get elevation from")
 					return {'FINISHED'}
 			elevObj = scn.objects[int(self.objElevLst)] if self.useElevObj else None
-			result.preprocess()
-			result.build(context, dstCRS = geoscn.crs, elevObj = elevObj, separate = self.separate, build_parameters=build_parameters)
+			result.geo_scene = geoscn
+			try:
+				rprj = Reproj(4326, geoscn.crs)
+				result.reprojector = rprj
+			except Exception as e:
+				log.error('Unable to reproject data', exc_info=True)
+				self.report({'ERROR'},
+							"Unable to reproject data ckeck logs for more infos")
+				return {'FINISHED'}
+
+			ray_caster = DropToGround(scn, elevObj) if elevObj else None
+		
+			result.preprocess(ray_caster=ray_caster)
+			result.build(context, ray_caster=ray_caster, separate = self.separate, build_parameters=build_parameters)
 
 		bbox = getBBOX.fromScn(scn)
 		adjust3Dview(context, bbox, zoomToSelect=False)

@@ -207,10 +207,19 @@ class OSMRelation(OSMElement):
         if any(m.element is None for m in self.members.values()):
             self._is_valid = False
             return
-        for node in self.nodes:
-            node.add_referenced_from(self.__class__, self._id)
+        
+        self.add_reference_to_nodes()
 
         self._is_preprocessed = True
+
+    def add_reference_to_nodes(self):
+        for id in self._node_ids:
+            node = self._library.get_element_by_id(id)
+            if node is None:
+                node = OSMNode(id = id, library = self._library)
+            node.add_reference(self.__class__, self._id)
+        # for node in self.nodes:
+        #     node.add_reference(self.__class__, self._id)
 
 
 @unique
@@ -362,7 +371,7 @@ class OSMMultiPolygonRelation(OSMRelation):
             return
         
         for node in self.get_nodes():
-            node.add_referenced_from(self.__class__, self._id)
+            node.add_reference(self.__class__, self._id)
 
         self.generate_polygons()
         self._is_preprocessed = True
@@ -438,7 +447,7 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
             return
         
         for node in self.get_nodes():
-            node.add_referenced_from(self.__class__, self._id)
+            node.add_reference(self.__class__, self._id)
 
         #Find outer element
         outline_id, outline_element = next(
@@ -745,14 +754,24 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
             self._is_valid = False
             return
         
-        for node in self.get_nodes():
-            node.add_referenced_from(self.__class__, self._id)
+        # for node in self.get_nodes():
+        #     node.add_reference(self.__class__, self._id)
+        self.add_reference_to_nodes()
 
         self.generate_polygons()
 
         self.assign_to_parent()
 
         self._is_preprocessed = True
+
+    def add_reference_to_nodes(self):
+        for id in self._node_ids:
+            node = self._library.get_element_by_id(id)
+            if node is None:
+                node = OSMNode(id = id)
+            node.add_reference(self.__class__, self._id)
+        # for node in self.nodes:
+        #     node.add_reference(self.__class__, self._id)
 
     def assign_to_parent(self):
         #Find if it is already referenced by a relation
@@ -773,7 +792,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
         free_node = None
         nodes = [n for outline in self.outer.values() for n in outline.get_nodes()]
         for node in nodes:
-            referenced_by = node.get_referenced_from().get(OSMBuilding, set())
+            referenced_by = node.get_referenced_from(OSMBuilding)
             if node._id in referenced_by:
                 for ref in referenced_by:
                     shared_by[ref] = shared_by.get(ref, 0) + 1

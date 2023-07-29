@@ -60,7 +60,7 @@ class OSMLibrary(object):
     Class to store the overpass response
     """
 
-    _class_collection_map: dict[T, OrderedDict[str, OSMElement]] = {}
+    _class_collection_map: dict[T, OrderedDict[int, OSMElement]] = {}
     _bounds: BoundingBox
 
     _bvh_trees: dict[str,'BVHTree'] = {}
@@ -72,6 +72,10 @@ class OSMLibrary(object):
     reprojector: Reproj = None
 
     def get_bvh_tree(self, element_type)->tuple['BVHTree',list[int]]:
+        #currently can't support mergeing trees
+        if isinstance(element_type, list):
+             (tree, tree_index) = self.create_bvh_tree(element_type=element_type)
+             return (tree, tree_index)
         tree = self._bvh_trees.get(element_type, None)
         tree_index = self._bvh_trees_index.get(element_type, None)
         if tree is None:
@@ -138,13 +142,16 @@ class OSMLibrary(object):
 
     def extend_elements(self, collection: list[OSMElement]):
         for element in collection:
-            if element is None:
-                continue
-            el_type = type(element)
-            if el_type in self._class_collection_map:
-                self._class_collection_map[el_type][element._id] = element
-            else:
-                self._class_collection_map[el_type] = OrderedDict([(element._id, element)])
+            self.add_element(element)
+
+    def add_element(self, element: OSMElement):
+        if element is None:
+            return
+        el_type = type(element)
+        if el_type in self._class_collection_map:
+            self._class_collection_map[el_type][element._id] = element
+        else:
+            self._class_collection_map[el_type] = OrderedDict([(element._id, element)])
 
     def get_element_by_id(self, elem_id: int) -> OSMElement | None:
         return self.get_elements(elem_id=[elem_id]).get(elem_id, None)
@@ -153,7 +160,7 @@ class OSMLibrary(object):
         return list(self.get_elements(elem_id=elem_ids).values())
 
     def get_elements(self,
-                     filter_cls: T = None,
+                     filter_cls: T|list(T) = None,
                      elem_id: int | list('int') = None) -> OrderedDict[int, T]:
         """
         Get a list of elements from the result and filter the element type by a class.
@@ -165,13 +172,13 @@ class OSMLibrary(object):
         :rtype: List
         """
         result = OrderedDict()
+        if filter_cls is not None and not isinstance(filter_cls, list):
+            filter_cls = [filter_cls]
 
-        if filter_cls is not None and filter_cls not in self._class_collection_map:
+        if filter_cls is not None and all(filter not in self._class_collection_map for filter in filter_cls):
             return result
-
-        classes = [
-            filter_cls
-        ] if filter_cls is not None else self._class_collection_map.keys()
+    
+        classes = filter_cls if filter_cls is not None else self._class_collection_map.keys()
         for cls in classes:
             if elem_id is not None:
                 elem_id = [elem_id] if isinstance(elem_id, int) else elem_id
@@ -181,7 +188,7 @@ class OSMLibrary(object):
                     if elem_value is not None:
                         result[id] = elem_value
             else:
-                result.update(self._class_collection_map[filter_cls])
+                result.update(self._class_collection_map.get(cls,{}))
         return result
 
     def get_ids(self, filter_cls):
@@ -298,7 +305,7 @@ class OSMLibrary(object):
 
         elements = [ElementFactory(library, e, data_type='xml') for e in root]
 
-        library.extend_elements(collection=elements)
+        # library.extend_elements(collection=elements)
         return library
 
 

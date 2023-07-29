@@ -51,6 +51,7 @@ def almost_overlapping(point1: Vector, point2: Vector, max_distance = 0.5):
 def xy_distance(point1: Vector, point2: Vector):
     return (point1.xy-point2.xy).magnitude
 
+
 def add_spline_point(end_point, location):
     BOC.select_all(action='DESELECT')
     select_spline_point(end_point) # the new point will be connected here

@@ -10,7 +10,7 @@ from .way import OSMWay
 
 from typing import TypeVar, Literal
 from .. import OSMLibrary
-
+from .....utils.bgis_utils import all_subclasses
 T = TypeVar('T', bound='OSMElement')
 
 _existing_elements:list[T] = [
@@ -30,7 +30,7 @@ def ElementFactory(library: OSMLibrary.OSMLibrary, element_definition, data_type
     validation_method_name = f'is_valid_{data_type}'
     creation_method_name = f'load_from_{data_type}'
     valid_types:list[T] = []
-    for possibility in _existing_elements:
+    for possibility in all_subclasses(OSMElement):
         is_valid = getattr(possibility, validation_method_name)
         if is_valid(element_definition):
             valid_types.append(possibility)

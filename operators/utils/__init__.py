@@ -2,3 +2,4 @@ from .bgis_utils import placeObj, adjust3Dview, showTextures, addTexture, getBBO
 from .georaster_utils import rasterExtentToMesh, geoRastUVmap, setDisplacer, bpyGeoRaster, exportAsMesh
 from .delaunay_voronoi import computeVoronoiDiagram, computeDelaunayTriangulation
 from .blender import almost_overlapping, xy_distance
+from .straight_skeleton import straightSkeletonOfPolygon

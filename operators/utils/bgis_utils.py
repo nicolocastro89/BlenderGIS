@@ -222,7 +222,7 @@ def remove_straight_angles(vertices:list[Vector], straight_angle_threshold:Numbe
 		dot = u1_x*u2_x + u1_y*u2_y
 		# cross = u1_x*u2_y - u1_y*u2_x possibly not useful if the dot product is 0
 
-		if dot and abs((u1_x*u2_y - u1_y*u2_x)/dot) >= straight_angle_tan:
+		if dot==0.0 or abs((u1_x*u2_y - u1_y*u2_x)/dot) >= straight_angle_tan:
 			result.append(vertices[i])
 		vertices_queue.rotate(-1)
 

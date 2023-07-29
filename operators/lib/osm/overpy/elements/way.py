@@ -1,4 +1,6 @@
 from __future__ import annotations
+import math
+from numbers import Number
 import pprint
 from typing import ClassVar, TypeVar
 from xml.etree.ElementTree import Element
@@ -12,7 +14,7 @@ if TYPE_CHECKING:
     from ..OSMLibrary import OSMLibrary
 
 T = TypeVar('T', bound='OSMWay')
-
+from mathutils import Vector
 
 class OSMWay(OSMElement):
     ''' A way is one of the fundamental elements of the map. In everyday language, it is a line.
@@ -34,6 +36,7 @@ class OSMWay(OSMElement):
     def __init__(self, **kwargs):
         super(OSMWay, self).__init__(**kwargs)
         self._node_ids = [int(n) for n in kwargs.get('nodes',[])]
+        self.add_reference_to_nodes()
         return
 
     def __getitem__(self, position:int)->OSMNode:
@@ -119,15 +122,20 @@ class OSMWay(OSMElement):
         """
         if self._is_preprocessed:
             return
-        self.add_reference_to_nodes()
+        #self.add_reference_to_nodes()
         self._is_preprocessed = True
         return
 
     def add_reference_to_nodes(self):
-        for node in self.nodes:
-            node.add_referenced_from(self.__class__, self._id)
+        for id in self._node_ids:
+            node = self._library.get_element_by_id(id)
+            if node is None:
+                node = OSMNode(id = id, library = self._library)
+            node.add_reference(self.__class__, self._id)
+        # for node in self.nodes:
+        #     node.add_reference(self.__class__, self._id)
 
-    def get_points(self, geoscn, reproject, ray_caster: DropToGround = None)->"list":
+    def get_points(self, geoscn= None, reproject=None, ray_caster: DropToGround = None)->"list":
         hits = [node.ray_cast_hit for node in self.nodes] 
         if not all(hits) and any(hits):
             zs = [p.loc.z for p in hits if p.hit]
@@ -137,30 +145,30 @@ class OSMWay(OSMElement):
                     v.loc.z = meanZ
         pts = [pt.loc for pt in hits]
         return pts 
-        # pts = [(float(node._lon), float(node._lat)) for node in self.nodes]
-        # pts = reproject.pts(pts)
-        # dx, dy = geoscn.crsx, geoscn.crsy
-
-        # if ray_caster:
-        #     pts = [ray_caster.rayCast(v[0]-dx, v[1]-dy) for v in pts]
-        #     hits = [pt.hit for pt in pts]
-        #     if not all(hits) and any(hits):
-        #         zs = [p.loc.z for p in pts if p.hit]
-        #         meanZ = sum(zs) / len(zs)
-        #         for v in pts:
-        #             if not v.hit:
-        #                 v.loc.z = meanZ
-        #     pts = [pt.loc for pt in pts]
-        # else:
-        #     pts = [ (v[0]-dx, v[1]-dy, 0) for v in pts]
-                                
-        # return pts
     
-    def get_vertices(self, bm, geoscn, reproject, ray_caster: DropToGround = None)->"list":
+    def get_vertices(self, bm, geoscn=None, reproject=None, ray_caster: DropToGround = None, subdivision_size: Number = None)->"list":
         pts = self.get_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
-        
+        if subdivision_size:
+            pts = self.subdivide_way(pts, subdivision_size)
         return [bm.verts.new(pt) for pt in pts]                      
 
+    def subdivide_way(self, points: list(tuple(float,float,float)), subdivision_size: Number)->list[tuple[float,float,float]]:
+        subdivided=[]
+        subdivided.append(points[0])
+        for first, second in zip(points, points[1:]):
+            number_steps, vec = self.get_subdivision_params(first, second, subdivision_size)
+            subdivided.extend((first+step*vec for step in range(1,number_steps)))
+
+        subdivided.append(points[-1])
+
+        return subdivided
+
+    
+    def get_subdivision_params(self, preceding_point: tuple[float,float,float], current_point:tuple[float,float,float], subdivision_size: Number)->tuple[int, Vector]:
+        vec = Vector(current_point) - Vector(preceding_point)
+        number_steps = max(math.ceil(vec.length/subdivision_size),1)
+        return number_steps, vec/number_steps
+    
     def calculate_length(self, geoscn = None, reproject = None,  ray_caster: DropToGround = None):
         pts = pts = [(float(node._lon), float(node._lat), 0) for node in self.nodes]
         if geoscn is not None and reproject is not None:
