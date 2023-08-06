@@ -187,7 +187,7 @@ class OSMRelation(OSMElement):
 
     def get_nodes(self) -> "list['OSMNode']":
         if len(self._nodes)==0 or len(self._nodes) != len(self._node_ids):
-            self._nodes = [node for member in self.members.values() for node in member.get_nodes() ]
+            self._nodes = [node for member in self.members.values() for node in member.nodes ]
             list(self._library.get_elements(OSMNode, self._node_ids).values())
         return self._nodes
     
@@ -257,7 +257,7 @@ class OSMMultipolygon(object):
         if len(self.ways)== 0 or self.is_closed():
             return []
         if len(self.ways) == 1:
-            return [self.ways[0].get_nodes()[0], self.ways[0].get_nodes()[1]]
+            return [self.ways[0].nodes[0], self.ways[0].nodes[1]]
         
         start = self.ways[0][0] if self.ways[0][0] in [self.ways[1][0],self.ways[1][-1]] else self.ways[0][-1]
         end = self.ways[-1][0] if self.ways[-1][0] in [self.ways[-2][0],self.ways[-2][-1]] else self.ways[-1][-1]
@@ -270,7 +270,7 @@ class OSMMultipolygon(object):
         self.order()
         possible_extension_points = self.end_points()
         if isinstance(extension, OSMWay):
-            return extension.get_nodes()[0] in possible_extension_points or extension.get_nodes()[-1] in possible_extension_points
+            return extension.nodes[0] in possible_extension_points or extension.nodes[-1] in possible_extension_points
         elif isinstance(extension, OSMMultipolygon):
             new_extension_points = extension.end_points()
             return any((p in possible_extension_points for p in new_extension_points))
@@ -370,7 +370,7 @@ class OSMMultiPolygonRelation(OSMRelation):
             self._is_valid = False
             return
         
-        for node in self.get_nodes():
+        for node in self.nodes:
             node.add_reference(self.__class__, self._id)
 
         self.generate_polygons()
@@ -446,7 +446,7 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
             self._is_valid = False
             return
         
-        for node in self.get_nodes():
+        for node in self.nodes:
             node.add_reference(self.__class__, self._id)
 
         #Find outer element
@@ -790,7 +790,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
         shared_by = {} # Dictionary of building Ids and how many nodes are encompassed by it
 
         free_node = None
-        nodes = [n for outline in self.outer.values() for n in outline.get_nodes()]
+        nodes = [n for outline in self.outer.values() for n in outline.nodes]
         for node in nodes:
             referenced_by = node.get_referenced_from(OSMBuilding)
             if node._id in referenced_by:
