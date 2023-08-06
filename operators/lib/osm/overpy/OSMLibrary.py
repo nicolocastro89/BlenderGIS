@@ -156,7 +156,7 @@ class OSMLibrary(object):
     def get_element_by_id(self, elem_id: int) -> OSMElement | None:
         return self.get_elements(elem_id=[elem_id]).get(elem_id, None)
 
-    def get_elements_by_ids(self, elem_ids: list('int')) -> list[OSMElement]:
+    def get_elements_by_ids(self, elem_ids: list[int]) -> list[OSMElement]:
         return list(self.get_elements(elem_id=elem_ids).values())
 
     def get_elements(self,
@@ -227,9 +227,9 @@ class OSMLibrary(object):
         for idx, building in self.get_elements(element_type).items():
             if reprojector:
                 nodes = [(p[0],p[1],0) for p in reprojector.pts([[n._lat, n._lon]
-                                    for n in building.get_nodes()[:-1]])]
+                                    for n in building.nodes[:-1]])]
             else:
-                nodes =[(n._lat, n._lon, 0) for n in building.get_nodes()[:-1]]
+                nodes =[(n._lat, n._lon, 0) for n in building.nodes[:-1]]
             # In the case of a multipolygon we consider the only outer linestring that defines the outline
             # of the polygon
             if not nodes:
