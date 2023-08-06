@@ -237,11 +237,10 @@ class OSMBridge(OSMManMade):
         return 
     
     def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, supported_highway_nodes=None, kd_tree:KDTree = None, build_parameters:dict={})->bmesh:
+        from mathutils.bvhtree import BVHTree
         verts = self.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size=10)
         
-        for vert in verts:
-            _, match_idx, _ = kd_tree.find(vert.co)
-            vert.co.z = supported_highway_nodes[match_idx].co.z
+        
         shifted_verts = itertools.cycle(verts)
         next(shifted_verts)
 
@@ -256,6 +255,13 @@ class OSMBridge(OSMManMade):
             face.normal_update()
             if face.normal.z < 0:
                 face.normal_flip()
+
+        bvh_tree = BVHTree.FromBMesh(bm)
+        direction = Vector((0,0,-1))
+        for vert in verts:
+            _, match_idx, _ = kd_tree.find(co = vert.co, 
+                                            filter = lambda idx: bvh_tree.ray_cast(supported_highway_nodes[idx].co, direction)[0] is not None)
+            vert.co.z = supported_highway_nodes[match_idx].co.z
 
         offset = build_parameters.get('bridge_height', 5)
         
@@ -405,6 +411,6 @@ class OSMBridgeSupport(OSMManMade):
             bmesh.ops.translate(bm, vec=Vector((0,0,desired_z)), verts=[vert])
         
         top_face = bm.faces.new(top_verts)
-        
+        self.is_built = True
         return bm
     
