@@ -54,11 +54,12 @@ class OSMElement(ABC):
         return self._id
 
     def __eq__(self, other):
-        return type(self)==type.other and self._id==other._id 
+        return type(self)==type(other) and self._id==other._id 
     
     @property
     def nodes(self)->list:
         return []
+    
     @property
     def references(self):
         return set().union(*self._referenced_by.values()) 
@@ -185,7 +186,7 @@ class OSMElement(ABC):
         shared_by = Counter() # Counter of Ids and how many nodes are encompassed by it
 
         free_nodes = []
-        for node in self._nodes:
+        for node in self.nodes:
             referenced_by = node.get_referenced_from(container_type)
             if referenced_by:
                 shared_by.update(referenced_by)
