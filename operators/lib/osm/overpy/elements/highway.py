@@ -112,43 +112,6 @@ class OSMHighway(OSMWay):
     def is_valid_json(cls, json_element:dict) -> bool:
         return super(OSMHighway, cls).is_valid_json(json_element) and cls._osm_sub_name in json_element.get('tags',{})
 
-    def get_ray_cast_hit_points(self, geoscn, reproject, ray_caster: DropToGround = None, subdivision_size:Number=None)->list[RayCastHit]:
-
-        dx, dy = geoscn.crsx, geoscn.crsy
-
-        delta_xy = Vector((dx,dy))
-        pts = [(float(node._lon), float(node._lat)) for node in self.nodes]
-        pts = [{'point':Vector(xy)-delta_xy, 'nodes':[self.nodes[idx]]} for idx, xy in enumerate(reproject.pts(pts))]
-        if subdivision_size:
-            subdivided=[]
-            subdivided.append(pts[0])
-            for first, second in zip(pts, pts[1:]):
-                number_steps, vector = self.getSubdivisionParams(first['point'], second['point'], subdivision_size)
-                subdivided.extend(({'point': first['point']+step*vector, 'nodes':[]} for step in range(1,number_steps)))
-            subdivided.append(pts[-1])
-            pts=subdivided
-
-        
-        rc_hits = []
-        if ray_caster:
-            for v in pts:
-                rc_hit = ray_caster.rayCast(v['point'].x, v['point'].y)
-                rc_hit.originating_node_ids = v['nodes']
-                rc_hits.append(rc_hit)
-
-            hits = [pt.hit for pt in rc_hits]
-            if not all(hits) and any(hits):
-                zs = [p.loc.z for p in rc_hits if p.hit]
-                meanZ = sum(zs) / len(zs)
-                for v in rc_hits:
-                    if not v.hit:
-                        v.loc.z = meanZ
-        else:
-            rc_hits = [ RayCastHit(loc=(v['point'].x, v['point'].y, 0), hit = True, originates_from= v['nodes']) for v in pts]
-
-        return rc_hits
-    
-   
     @classmethod
     def load_highway_profiles(cls):
         if cls.collectionName not in bpy.data.collections:
@@ -167,29 +130,26 @@ class OSMHighway(OSMWay):
             bevelObj.hide_select = True
             bevelObj.hide_render = True
             
-    def get_highway_continuation(self, include_links=False)->HighwayContinuation:
-        first, last = self.end_points()
-        
-        #Get all highway points that share the first endpoint
-        first_referenced = self._library.get_elements_by_ids(list(first.get_referenced_from(type(self))))
-
-        #only take highways that are not self, are of the same type and have the endpoint in an endpoint position
-        filter_highway_type = lambda h: h.highway_type == self.highway_type if not include_links else h.highway_base_type == self.highway_base_type
-        filter_highways = lambda h,endpoint: h._id!=self._id and filter_highway_type(h) and endpoint in h.end_points()
-        first_referenced = [h for h in first_referenced if filter_highways(h, first)]
-        #first_referenced = first_referenced[0] if len(first_referenced)==1 else None
-
-        last_referenced = self._library.get_elements_by_ids(list(last.get_referenced_from(type(self))))
-        last_referenced = [h for h in last_referenced if filter_highways(h, last)]
-        #last_referenced = last_referenced[0] if len(last_referenced)==1 else None
-
-        return HighwayContinuation(first_referenced, last_referenced)
-
     @classmethod
     def preprocess(cls, library: OSMLibrary, ray_caster:DropToGround):
         highways = library.get_elements(cls).values()
         for part in highways:
             part.preprocess_instance(geoscn = library.geo_scene, ray_caster=ray_caster)
+
+        from .man_made import OSMBridge
+        bridges_bvh_tree, bridges_bvh_tree_indices = library.get_bvh_tree(OSMBridge)
+
+        for part in (h for h in highways if 'bridge' in h._tags):
+            bridge_indices = [bridges_bvh_tree.ray_cast((n._lat, n._lon, -1.), zAxis)[2] for n in part.nodes]
+            bridge_ids = [bridges_bvh_tree_indices[idx] for idx in bridge_indices if idx is not None]
+            for id in bridge_ids:
+                bridge = library.get_element_by_id(id)
+                print(f'Found bridge {id}')
+                if part.layer==bridge.layer:
+                    print(f'Found highway with correct layer for {id}: {part._id}')
+                    bridge.add_reference(OSMHighway, part._id)
+                    part.add_reference(OSMBridge, id)
+        
 
     def preprocess_instance(self, geoscn, ray_caster:DropToGround):#, bridges: tuple['BVHTree',list[int]]
         """Preprocess the highway by doing the following in order:
@@ -198,9 +158,9 @@ class OSMHighway(OSMWay):
         #from .man_made import OSMBridge
         self._is_preprocessed = False
         super(OSMHighway,self).preprocess_instance(geoscn, ray_caster)
-        if 'bridge' in self._tags:
-            print(f'Looking for bridges for {self._id}')
-            self.find_assigned_bridges()
+        # if 'bridge' in self._tags:
+        #     print(f'Looking for bridges for {self._id}')
+        #     self.find_assigned_bridges()
         
         self._is_preprocessed = True
         return
@@ -219,7 +179,6 @@ class OSMHighway(OSMWay):
                 bridge.add_reference(OSMHighway, self._id)
                 self.add_reference(OSMBridge, id)
 
-    
     @classmethod
     def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict=None) -> None:
         from .man_made import OSMBridge
@@ -237,78 +196,47 @@ class OSMHighway(OSMWay):
             if bm.verts.layers.string.get('node', None) is None:
                 bm.verts.layers.string.new('node')
             part._build_highway_with_graph(bm, geoscn, reproject, ray_caster, build_parameters)
-            #part._build_highway_in_mesh(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)
 
-        bridges = library.get_elements_by_ids(part._referenced_by.get(OSMBridge, []))
-        if any(not b.is_built for b in bridges):
-            bridge_nodes = []
-            bridge_vertices = []
-            for p in (h for h in highways if h.tags.get('bridge',False)):
-                bridge_nodes.extend((n._id for n in p.nodes))
-            
-            for bm in meshes.values():
-                layer = bm.verts.layers.string.get('node')
-                for v in bm.verts:
-                    if int(v[layer].decode()) in bridge_nodes:
-                        bridge_vertices.append(v)
-
-            size = len(bridge_vertices)
-            kd = KDTree(size)
-
-            for i, v in enumerate(bridge_vertices):
-                kd.insert(Vector((v.co[0], v.co[1], 0)), i)
-            kd.balance()
-            for bridge in [b for b in bridges if not b.is_built]:
-                bridge_bm = bmesh.new()
-                bridge_bm = bridge._build_instance(
-                                        bridge_bm, 
-                                        geoscn=geoscn, 
-                                        reproject=reproject, 
-                                        ray_caster=ray_caster, 
-                                        supported_highway_nodes = bridge_vertices, 
-                                        kd_tree = kd,
-                                        build_parameters=build_parameters)
+        for part in (p for p in highways if 'bridge' in p._tags):
+            bridges = set(library.get_elements_by_ids([ b for b in part.get_referenced_from(OSMBridge)]))
+                        # part._referenced_by.get(OSMBridge, []))
+            if any(not b.is_built for b in bridges):
+                bridge_nodes = []
+                bridge_vertices = []
+                for p in (h for h in highways if h.tags.get('bridge',False) is not False):
+                    bridge_nodes.extend((n._id for n in p.nodes))
                 
-                bmesh.ops.remove_doubles(bridge_bm, verts=bridge_bm.verts, dist=0.0001)
-                bridge_object = bpy.data.objects.new(str(bridge._id),bpy.data.meshes.new(str(bridge._id)))
-                geoscn.scn.collection.objects.link(bridge_object)
-                bridge._is_built = True
+                for bm in meshes.values():
+                    layer = bm.verts.layers.string.get('node')
+                    for v in bm.verts:
+                        if int(v[layer].decode()) in bridge_nodes:
+                            bridge_vertices.append(v)
 
-                bridge_bm.to_mesh(bridge_object.data)
-                bridge_bm.free()
+                size = len(bridge_vertices)
+                kd = KDTree(size)
 
-        # for part in highways:
-        #     bm = meshes.get(part.highway_type)
-        #     if bm:
-        #         bm.verts.ensure_lookup_table()
-        #         bridges = library.get_elements_by_ids(part._referenced_by.get(OSMBridge, []))
-        #         if any(not b.is_built for b in bridges):
-        #             size = len(bm.verts)
-        #             kd = KDTree(size)
+                for i, v in enumerate(bridge_vertices):
+                    kd.insert(Vector((v.co[0], v.co[1], 0)), i)
+                kd.balance()
+                for bridge in [b for b in bridges if not b.is_built]:
+                    bridge_bm = bmesh.new()
+                    bridge_bm = bridge._build_instance(
+                                            bridge_bm, 
+                                            geoscn=geoscn, 
+                                            reproject=reproject, 
+                                            ray_caster=ray_caster, 
+                                            supported_highway_nodes = bridge_vertices, 
+                                            kd_tree = kd,
+                                            build_parameters=build_parameters)
+                    
+                    bmesh.ops.remove_doubles(bridge_bm, verts=bridge_bm.verts, dist=0.0001)
+                    bridge_object = bpy.data.objects.new(str(bridge._id),bpy.data.meshes.new(str(bridge._id)))
+                    geoscn.scn.collection.objects.link(bridge_object)
+                    bridge._is_built = True
 
-        #             for i, v in enumerate(bm.verts):
-        #                 kd.insert(Vector((v.co[0], v.co[1], 0)), i)
-        #             kd.balance()
+                    bridge_bm.to_mesh(bridge_object.data)
+                    bridge_bm.free()
 
-        #             for bridge in [b for b in bridges if not b.is_built]:
-        #                 bridge_bm = bmesh.new()
-        #                 bridge_bm = bridge._build_instance(
-        #                                         bridge_bm, 
-        #                                         geoscn=geoscn, 
-        #                                         reproject=reproject, 
-        #                                         ray_caster=ray_caster, 
-        #                                         supported_highway_nodes = bm.verts, 
-        #                                         kd_tree = kd,
-        #                                         build_parameters=build_parameters)
-                       
-        #                 bmesh.ops.remove_doubles(bridge_bm, verts=bridge_bm.verts, dist=0.0001)
-        #                 bridge_object = bpy.data.objects.new(str(bridge._id),bpy.data.meshes.new(str(bridge._id)))
-        #                 geoscn.scn.collection.objects.link(bridge_object)
-        #                 bridge._is_built = True
-
-        #                 bridge_bm.to_mesh(bridge_object.data)
-        #                 bridge_bm.free()
-        
         
         for highway_type,highway_bmesh in meshes.items():
             if len(highway_bmesh.verts)== 0:
@@ -358,8 +286,9 @@ class OSMHighway(OSMWay):
             self._get_full_highway_pieces(new_piece, highway_pieces)
 
 
-    def _build_highway_with_graph(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+    def _build_highway_with_graph(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict=None)->bmesh:
         #Get all highways pieces which are either of the same type of links
+        build_parameters = build_parameters or {}
         built_highways = set([self])
         self._get_full_highway_pieces(self, built_highways)
         
@@ -381,56 +310,15 @@ class OSMHighway(OSMWay):
         for starting_node in takewhile(lambda x: x is not None , graph.get_unbuilt_nodes([highway_base_type+'_link'])):
             self._breadth_first_build_graph(bm, ray_caster=ray_caster, graph=graph, start = starting_node, built = set(), valid_edges = [highway_base_type+'_link'], build_parameters=build_parameters)
         
-
-        # bridges = set([bridge for part in built_highways for bridge in self._library.get_elements_by_ids(part._referenced_by.get(OSMBridge, []))])
-        # if any(not b.is_built for b in bridges):
-        #     # bm.verts.ensure_lookup_table()
-        #     bridge_vertices = [node.vertex for node,neighbors in graph.adj_list.items() if node.vertex is not None and any(edge.is_continuation(required_tags=['bridge']) for _,edge in neighbors)]
-        #     size = len(bridge_vertices)
-        #     kd = KDTree(size)
-        #     for i, n in enumerate(bridge_vertices):
-        #         kd.insert(Vector((n.co[0], n.co[1], 0)), i)
-        #     kd.balance()
-
-        #     for bridge in (b for b in bridges if not b.is_built):
-        #         bridge_bm = bmesh.new()
-        #         bridge_bm = bridge._build_instance(
-        #                                 bridge_bm, 
-        #                                 geoscn=geoscn, 
-        #                                 reproject=reproject, 
-        #                                 ray_caster=ray_caster, 
-        #                                 supported_highway_nodes = bridge_vertices, 
-        #                                 kd_tree = kd,
-        #                                 build_parameters=build_parameters)
-                
-        #         bmesh.ops.remove_doubles(bridge_bm, verts=bridge_bm.verts, dist=0.0001)
-        #         bridge_object = bpy.data.objects.new(str(bridge._id),bpy.data.meshes.new(str(bridge._id)))
-        #         geoscn.scn.collection.objects.link(bridge_object)
-        #         bridge._is_built = True
-
-        #         bridge_bm.to_mesh(bridge_object.data)
-        #         bridge_bm.free()
-        
-        
-        # starting_node = next((n1 for n1,adj in graph.adj_list.items() if 
-        #                       any(e.is_continuation([highway_base_type]) for _,e in adj)), None)
-        
-        # if starting_node is not None:
-            
-        
-        # # build links
-        # for starting_link in [node for (node, adj) in graph.adj_list.items() if 
-        #                       (any(e.is_continuation([highway_base_type])) and any(e.is_continuation([highway_base_type+'_link'])) for _,e in adj)]:
-        #     self._breadth_first_build_graph(bm, ray_caster=ray_caster, graph=graph, start = starting_link, built = set(), valid_edges = [highway_base_type+'_link'], build_parameters=build_parameters)
-
-
         for highway in built_highways:
             highway.is_built = True
 
-    def _breadth_first_build_graph(self, bm:BMesh, ray_caster: DropToGround, graph: HighwayGraph, start:HighwayGraphNode, built:set = set(), valid_edges:list(str)=[], build_parameters:dict={}):
+    def _breadth_first_build_graph(self, bm:BMesh, ray_caster: DropToGround, graph: HighwayGraph, start:HighwayGraphNode, built:set = None, valid_edges:list(str)=None, build_parameters:dict=None):
 
         print(f'Setting off breadth first building, starting node is {start.node}')
-
+        built = built or set()
+        valid_edges = valid_edges or []
+        build_parameters = build_parameters or {}
         queue = deque()
         start.is_built = True
         if start.node.ray_cast_hit.hit:
@@ -520,6 +408,7 @@ class OSMHighway(OSMWay):
                 actual_path[0].vertex = bm.verts.new(actual_path[0].node.ray_cast_hit.loc)
             self._build_leveled_path(path=actual_path,
                                     path_length=longest_to_build,
+                                    graph = graph,
                                     built= built,
                                     bm=bm,
                                     ray_caster=ray_caster,
@@ -536,16 +425,21 @@ class OSMHighway(OSMWay):
 
         return neighbors        
     
-    def _build_leveled_path(self, path: list[HighwayGraphNode], path_length: float, built: set[HighwayGraphNode], bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None):
-        #print('\t'+f'building path starting at {path[0].id} and ending at {path[-1].id}')
+    def _build_leveled_path(self, path: list[HighwayGraphNode], path_length: float, graph: HighwayGraph, built: set[HighwayGraphNode], bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None):
+        print('\t'+f'building path starting at {path[0].id} and ending at {path[-1].id}')
         build_parameters = build_parameters or {}
         max_delta = 0
-        for p1,p2 in zip(path[:-1], path[1:]):
-            traveled_distance = ((p1.node.ray_cast_hit.loc[0]-p2.node.ray_cast_hit.loc[0])**2 + 
-                                  (p1.node.ray_cast_hit.loc[1]-p2.node.ray_cast_hit.loc[1])**2)**0.5
-            vertical_distance = p1.node.ray_cast_hit.loc[2]-p2.node.ray_cast_hit.loc[2]
-            max_delta = max(max_delta, abs(vertical_distance/traveled_distance))
 
+        intermediate_points = []
+        for p1,p2 in zip(path[:-1], path[1:]):
+            
+            intermediate_points.append(self.subdivide_way([p1.node.ray_cast_hit.loc,p2.node.ray_cast_hit.loc], build_parameters.get('highway_subdivision_size', None))[1:-1])
+            for ip1,ip2 in zip(intermediate_points[-1][:-1], intermediate_points[-1][1:]):
+                traveled_distance = ((ip1[0]-ip2[0])**2 + (ip1[1]-ip2[1])**2)**0.5
+                vertical_distance = ip1[2]-ip2[2]
+                max_delta = max(max_delta, abs(vertical_distance/traveled_distance))
+
+        print(f'MAX DELTA FOR LEVELLED PATH IS {max_delta}')
         starting_height = next((p.node.ray_cast_hit.loc[2] for p in path if p.node.ray_cast_hit.hit), 0)
         ending_height = next((p.node.ray_cast_hit.loc[2] for p in reversed(path) if p.node.ray_cast_hit.hit), 0)
 
@@ -557,9 +451,10 @@ class OSMHighway(OSMWay):
         delta_z = (ending_height-starting_height)/path_length
         total_traveled_distance = 0
 
-        layer_height = self.layer * build_parameters.get('layer_default_height',10)
         layer_access_ramp_length = build_parameters.get('layer_acccess_ramp_length',50.)
         for previous_graph_node, current_graph_node in zip(path[:-1],path[1:]):
+            edge = next(e for n,e in graph.adj_list[previous_graph_node] if n.id == current_graph_node.id)
+            layer_height = int(edge.tags.get('layer', 0)) * build_parameters.get('layer_default_height',10)
             current_graph_node.is_built=True
             built.add(current_graph_node)
 
@@ -573,16 +468,14 @@ class OSMHighway(OSMWay):
             ramp_ratio = distance_from_end/layer_access_ramp_length
 
             
-            if max_delta>0.05:
+            if max_delta>0.3:
                 actual_z = starting_height + delta_z*total_traveled_distance
+                print(f'BIG GROUND DROP GOING STRAIGHT WITH HEIGHT {actual_z}')
             else:
                 minimal_ramp_height = ramp_ratio*layer_height
                 actual_z = starting_height + max(delta_z*total_traveled_distance, minimal_ramp_height)
+                print(f'SMALL GROUND DROP GOING UP TO {layer_height} ({ramp_ratio}%) actual_z')
             
-            if actual_z > 300:
-                print('TOO HIGH')
-                newline = "\n\t"
-                print(f'Positioning point {current_graph_node.id} at z {actual_z}. Full path{newline}{newline.join(n.id for n in path)}')
             current_graph_node.node.ray_cast_hit.loc[2] = actual_z # + ramp_ratio*layer_height
 
             if not current_graph_node.node.ray_cast_hit.hit:
@@ -600,13 +493,12 @@ class OSMHighway(OSMWay):
                 if previous_graph_node.vertex is None:
                     z = current_graph_node.vertex.co[2]
                 else:
-                    z = i/(len(built_vertices)+1) *(current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
+                    z = (len(built_vertices)-i)/(len(built_vertices)+1) *(current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
                     # print(f'Bridging between {current_graph_node.vertex.co[2]}-{previous_graph_node.vertex.co[2]} ration {i/(len(built_vertices)+1)} height {z} setting it to {starting_height + z}')
                 #distance_from_end/traveled_distance * (current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
                 #print(f'distance from end {distance_from_end} end nodes have height: {previous_graph_node.vertex.co[2]}-{current_graph_node.vertex.co[2]} ratio {distance_from_end/traveled_distance} height {z} from {starting_height}')
                 built_vertex.co[2] = current_graph_node.vertex.co[2] - z
             
-
     def _build_highway_graph_edge(self, start: HighwayGraphNode, end:HighwayGraphNode, edge: HighwayGraphEdge, bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None)->list[BMVert]:
         # print(f'building edge between {start.id} and {end.id}')
         build_parameters = build_parameters or {}
@@ -642,243 +534,11 @@ class OSMHighway(OSMWay):
                 graph.add_edge(v1=v1, v2=v2, edge_tags=highway._tags)
         return graph
         
-
-    def _build_highway_in_mesh(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
-        from .man_made import OSMBridge
-        leveled_type = next((t for t in self._highways_to_level if t in self._tags), None)
-        built_highways = [self]
-        if leveled_type:
-            continuation = self.get_highway_continuation()
-            if len(continuation.after)>0 and leveled_type in continuation.after[0]._tags:
-                built_highways.append(continuation.after[0])
-                built_highways.extend(continuation.after[0].get_all_highway_parts(self, possible_subtypes = [leveled_type]))
-            if len(continuation.before)>0 and leveled_type in continuation.before[0]._tags:
-                built_highways.insert(0,continuation.before[0])
-                built_highways[:0] = continuation.before[0].get_all_highway_parts(self, possible_subtypes = [leveled_type])
-            points = self.combine_highway_points(built_highways, geoscn=geoscn, reproject=reproject, ray_caster = ray_caster, subdivision_size=None)
-            self.level_points(points,build_parameters)
-        else:
-            points = self.get_ray_cast_hit_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size=build_parameters.get('highway_subdivision_size', None))
-        
-        hit_points = groupby(points, key= lambda p: p.hit)
-        grouped_vertices = []
-        for k,highway_points in hit_points:
-            if k:
-                grouped_vertices.append([bm.verts.new(pt.loc) for pt in highway_points])
-                # points = self.combine_highway_points(list(highway_part), geoscn, reproject, ray_caster, build_parameters)
-
-        for vertices in grouped_vertices:
-            for v in zip(vertices[:-1], vertices[1:]):
-                bm.edges.new(v)
-
-        for highway_part in built_highways:
-            highway_part._is_built = True
-
-        # for highway_part in built_highways:
-        #     bridges = self._library.get_elements_by_ids(highway_part._referenced_by.get(OSMBridge, []))
-
-        #     if any(not b.is_built for b in bridges):
-        #         all_vertices = [v for vertex_group in grouped_vertices for v in vertex_group]
-        #         size = len(points)
-        #         kd = KDTree(size)
-
-        #         for i, v in enumerate(all_vertices):
-        #             kd.insert(Vector((v.co[0], v.co[1], 0)), i)
-        #         kd.balance()
-
-        #         for bridge in [b for b in bridges if not b.is_built]:
-        #             bridge_bm = bmesh.new()
-        #             bridge_bm = bridge._build_instance(
-        #                                     bridge_bm, 
-        #                                     geoscn=geoscn, 
-        #                                     reproject=reproject, 
-        #                                     ray_caster=ray_caster, 
-        #                                     supported_highway_nodes = all_vertices, 
-        #                                     kd_tree = kd,
-        #                                     build_parameters=build_parameters)
-                    
-        #             bmesh.ops.remove_doubles(bridge_bm, verts=bridge_bm.verts, dist=0.0001)
-        #             bridge_object = bpy.data.objects.new(str(bridge._id),bpy.data.meshes.new(str(bridge._id)))
-        #             geoscn.scn.collection.objects.link(bridge_object)
-        #             bridge._is_built = True
-
-        #             bridge_bm.to_mesh(bridge_object.data)
-        #             bridge_bm.free()
-        return bm     
-
-    def combine_highway_points(self, highway_parts: list[OSMHighway], geoscn, reproject, ray_caster:DropToGround = None, subdivision_size:Number=None):
-        points = highway_parts[0].get_ray_cast_hit_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size=subdivision_size)
-        for idx in range(1,len(highway_parts)):
-            current_part = highway_parts[idx]
-            previous_part = highway_parts[idx-1]
-
-            part_points = current_part.get_ray_cast_hit_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, subdivision_size = subdivision_size)
-            if current_part.nodes[-1] == previous_part.nodes[-1]:
-                part_points.reverse()
-            if current_part.nodes[0] == previous_part.nodes[0]:
-                points.reverse()
-
-            points.extend(part_points[1:])
-        return points
-       
-    def shift_spline_by(self, spline, by:int):
-        spline.points.add(by)
-        for i in reversed(range(len(spline.points))):
-            if i>=by:
-                spline.points[i].co = [*spline.points[i-by].co]
-            else:
-                spline.points[i].co = (0,0,0,1.0)
-
-    def level_points(self, points: list[RayCastHit], build_parameters:dict={}):
-        
-        full_length = sum(((p1.loc[0]-p2.loc[0])**2 + (p1.loc[1]-p2.loc[1])**2)**0.5 for p1, p2 in zip(points[:-1], points[1:]))
-        
-        starting_height = points[0].loc[2] if points[0].hit else None
-        ending_height = points[-1].loc[2] if points[-1].hit else None
-
-        delta_z=0
-        if starting_height is None and ending_height is None:
-            first_initial_node = next((p for p in points if p.hit), None)
-            starting_height = first_initial_node.loc[2] if first_initial_node else 0
-
-            first_ending_node = next((p for p in points[::-1] if p.hit), None)
-            ending_height = first_ending_node.loc[2] if first_ending_node else 0
-            starting_height = ending_height = max(starting_height, ending_height)
-
-        if starting_height is not None and ending_height is None:
-            ending_height = starting_height
-        elif starting_height is None and ending_height is not None:
-            starting_height = ending_height
-            
-        delta_z = (ending_height-starting_height)/full_length
-        full_distance = 0
-        
-        layer_height = self.layer * build_parameters.get('layer_default_height',10)
-        layer_access_ramp_length = build_parameters.get('layer_acccess_ramp_length',50.)
-        for i in range(1,len(points)):
-            full_distance += ((points[i-1].loc[0]-points[i].loc[0])**2 + (points[i-1].loc[1]-points[i].loc[1])**2)**0.5
-            distance_from_end = min([abs(full_distance-full_length),full_length-full_distance, layer_access_ramp_length])
-            ramp_ratio = distance_from_end/layer_access_ramp_length
-            points[i].loc[2] = starting_height + delta_z*full_distance + ramp_ratio*layer_height
-
-    def get_all_highway_parts(self, previous: OSMHighway, stop_at_type_change = True, possible_subtypes = [])->list[OSMHighway]:
-        print(f'Getting continuation for {self}')
-        conditions = {
-            'different_ids': lambda p, n: n is not None and n._id != p._id,
-            'same_type': lambda p, n: n is not None and p.highway_type == n.highway_type,
-            'subtype_in': lambda p, n: n is not None and (any(n._tags.get(t, None)== 'yes' for t in possible_subtypes) or len(possible_subtypes)==0)
-        }
-        all_parts = []
-        filter_algorithm = lambda p, n: conditions['different_ids'](p,n)
-        if stop_at_type_change and len(possible_subtypes)>0:
-            filter_algorithm = lambda p, n: conditions['different_ids'](p,n) and conditions['same_type'](p,n) and conditions['subtype_in'](p,n)
-        elif stop_at_type_change:
-            filter_algorithm = lambda p, n: conditions['different_ids'](p,n) and conditions['same_type'](p,n)
-        elif len(possible_subtypes)>0:
-            filter_algorithm = lambda p, n: conditions['different_ids'](p,n) and conditions['subtype_in'](p,n)
-
-        continuation = self.get_highway_continuation()
-        next = None
-        if len(continuation.after)>0 and filter_algorithm(previous, continuation.after[0]):
-            next = continuation.after[0]
-        elif len(continuation.before)>0 and filter_algorithm(previous, continuation.before[0]):
-            next = continuation.before[0]
-        
-        if next is not None:
-            all_parts.append(next)
-            all_parts.extend(next.get_all_highway_parts(self, stop_at_type_change, possible_subtypes))
-
-        return all_parts
-        
-
-    def isPointOnTerrain(self, point, ray_caster:DropToGround = None) -> bool:
-        return ray_caster(point, -zAxis)[0] != None
-
-    def getSubdivisionParams(self, preceding_point: tuple[float,float], current_point:tuple[float,float], subdivision_size: Number)->tuple[int, Vector]:
+    def get_subdivision_params(self, preceding_point: tuple[float,float], current_point:tuple[float,float], subdivision_size: Number)->tuple[int, Vector]:
         vec = Vector(current_point) - Vector(preceding_point)
         number_steps = max(math.ceil(vec.length/subdivision_size),1)
         return number_steps, vec/number_steps
     
-    def setSplinePoint(self, spline,  index: int, point):
-        self.spline.points[index].co = (point[0], point[1], point[2], 1.)
-        self.pointIndex += 1
-
-    def processOnTerrainOnTerrain(self, spline, preceding_point, current_point, number_steps: int, vec, closed):
-        """
-        Create spline if both points are on the terrain just create the intermediate points
-        """
-        
-        index = len(spline.points)
-        spline.points.add(number_steps)
-        p = preceding_point
-        for i in range(number_steps-1):
-            p = p + vec
-            spline.points[index+i].co = (*p ,1.0)
-            self.setSplinePoint(index+i, p)
-        self.setSplinePoint(len(spline.points)-1, current_point)
-    
-    def processNoTerrainOnTerrain(self, spline, preceding_point, current_point, number_steps, vec, ray_caster:DropToGround = None):
-        """
-        Start the spline at the first sub division over the terrain. Start halfway and 
-        keep adjusting by half.
-        """
-        # By iteration find the first point on the terrain
-        firstTerrainPointIndex = number_steps
-        bound1 = 0
-        bound2 = number_steps
-        # index of subdivision points starting from 1
-        pointIndex = math.ceil((bound1 + bound2)/2)
-        while True:
-            # coordinates of the subdivision point with the index <pointIndex>
-            if self.isPointOnTerrain(preceding_point + pointIndex * vec, ray_caster):
-                firstTerrainPointIndex = pointIndex
-                if pointIndex == bound1+1: #If it's the first point then stop
-                    break
-                bound2 = pointIndex
-                pointIndex = math.ceil((bound1 + bound2)/2)
-            else:
-                if pointIndex==bound2-1: #Last possible index, found point is the first
-                    break
-                bound1 = pointIndex
-                pointIndex = math.ceil((bound1 + bound2)/2)
-
-        spline.points.add(number_steps - firstTerrainPointIndex)
-        for pointIndex in range(firstTerrainPointIndex, number_steps):
-            p = preceding_point + pointIndex * vec
-            spline.points[pointIndex-firstTerrainPointIndex].co = (*p ,1.0)
-            self.setSplinePoint(pointIndex-firstTerrainPointIndex, p)
-        self.setSplinePoint(len(spline.points)-1, current_point)
-    
-    def processOnTerrainNoTerrain(self, spline, preceding_point, current_point, number_steps, vec, ray_caster:DropToGround = None):
-        """
-        Find the last point to plot as the spline goes off terrain
-        """
-        lastTerrainPointIndex = 0
-        bound1 = 0
-        bound2 = number_steps
-        # index of subdivision points starting from 1
-        pointIndex = math.ceil((bound1 + bound2)/2)
-        while True:
-            # coordinates of the subdivision point with the index <pointIndex>
-            if self.isPointOnTerrain(preceding_point + pointIndex * vec, ray_caster=ray_caster):
-                lastTerrainPointIndex = pointIndex
-                if pointIndex == bound2-1:
-                    break
-                bound1 = pointIndex
-                pointIndex = math.ceil((bound1 + bound2)/2)
-            else:
-                if pointIndex==bound1+1:
-                    break
-                bound2 = pointIndex
-                pointIndex = math.floor((bound1 + bound2)/2)
-        if lastTerrainPointIndex:
-            
-            spline.points[0].co = (*preceding_point ,1.0)
-            spline.points.add(lastTerrainPointIndex)
-            for pointIndex in range(1, lastTerrainPointIndex+1):
-                p = preceding_point + pointIndex * vec
-                spline.points[pointIndex].co = (*p ,1.0)
-        self.spline = None
     
 class OSMHighWaySubType():
     """
@@ -1091,17 +751,6 @@ class HighwayGraphEdge():
     types=set()
     is_built = False
 
-    edges:list[BMEdge] =[]
-    vertices:list[BMVert] =[]
-
-    def add_intermediate_vertex(self, vertex: BMVert):
-        self.vertices.append(vertex)
-
-    def add_intermediate_edge(self, edge: BMEdge):
-        self.edges.append(edge)
-
-    
-    
     def is_continuation(self, required_tags:list)->bool:
         return all(t in self.types for t in required_tags)
 
@@ -1151,17 +800,6 @@ class HighwayGraph():
     def get_valid_neighbors(self, node:HighwayGraphNode, valid_edges:list[str] =[])->list[tuple[HighwayGraphNode,HighwayGraphEdge]]:
         return [(n,e) for (n,e) in self.adj_list[node] if e.is_continuation(valid_edges)]
 
-    def dfs_explore(self, start, path = [], visited = set(), valid_edges:list[str]=[]):
-        path.append(start)
-        visited.add(start)
-        paths = []
-        for (neighbor, edge) in self.adj_list[start]:
-            if neighbor not in visited and edge.is_continuation(valid_edges):
-                current_path = path+[neighbor]
-                paths.append(current_path)
-                paths.extend(self.dfs_explore(neighbor, current_path, visited, valid_edges=valid_edges))
-        return paths
-    
     def dfs(self, start, target = None, path = [], visited = set(), valid_edges:list[str]=[]):
         path.append(start)
         visited.add(start)
@@ -1176,6 +814,9 @@ class HighwayGraph():
         return None
     
     def bfs_explore(self, start_node, valid_edges = [])->dict[str,float]:
+        """
+        Get list of all possible paths by length. 
+        """
         print(f'BFS explore starting from {start_node.id} and searching for edges of type {";".join(valid_edges)}')
         #visited = set()
         queue = deque()
@@ -1187,8 +828,6 @@ class HighwayGraph():
         while queue:
             current_path = queue.popleft()
             current_node = self.__getitem__(current_path[-1])
-            # current_path = ','.join(list(filter(None,current_path.split(',')))+[str(current_node.id)]) 
-            # list(filter(None,current_path.split(',')))+[str(current_node.id)]
             for (neighbor,edge) in self.adj_list[current_node]:
                 # print(f'Looking at neighbor {neighbor.id} which has and edge of type {";".join(edge.types)}')
                 if edge.is_continuation(valid_edges):
@@ -1203,34 +842,23 @@ class HighwayGraph():
                 distances.pop(path)
         return distances
 
-    def  bfs_farthest(self, start_node, valid_edges = [])->tuple[list[int],float]:
-        distances = self.bfs_explore(start_node, valid_edges)
-        
-        max_distance = max(distances.values())
-        return next((([int(id) for id in path.split(',')], max_distance) for (path,distance) in distances.items() if distance == max_distance),None)
+    # def de_reference_path(self, bfs_explore_result: dict[str,float]):
+    #     de_referenced_paths = []
+    #     for p, d in sorted(bfs_explore_result.items(), key=itemgetter(1), reverse=True):
+    #         ids= p.split(',')
+    #         for previous_v, current_v in zip(ids[:-1], ids[1:]):
+    #             previous_n, current_n, edge = next(n1,n2,e for )
+    #     path_distances = [([int(id) for id in p.split(',')], d ) for p,d in sorted(bfs_explore_result.items(), key=itemgetter(1), reverse=True)]
+    #     for node in self.adj_list.keys():
+    #         for path,_ in path_distances:
+    #             try:
+    #                 path[path.index(node.id)] = node
+    #             except:
+    #                 continue
 
-    def _explore_node(self, current_path, current_node, valid_edges, distances, visited):
-        updated_path = f'{current_path},{current_node.id}'
-        for (neighbor,edge) in self.adj_list[current_node]:
-            if edge.is_continuation(valid_edges):
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    distances[f'{updated_path},{neighbor.id}'] = distances[current_path]+edge.length
-
-    def find_longest_path(self, valid_edges = [])->list[int]:
-        starting_node = next((n1 for n1,adj in self.adj_list.items() if 
-                              any(e.is_continuation(valid_edges) for _,e in adj)), None)
-        
-        if starting_node is None:
-            return None
-        first_path, distance = self.bfs_farthest(starting_node, valid_edges=valid_edges)
-        first_node = first_path[-1]
-        second_path, distance = self.bfs_farthest(first_node, valid_edges=valid_edges)
-        return second_path
-    
     def get_unbuilt_nodes(self, highway_types:list = []):
-        for node,edges in self.adj_list.items():
-            if node.vertex is None and any(not e.is_built and e.is_continuation(highway_types) for _,e in edges):
+        for node,edges in sorted(self.adj_list.items(), key=lambda x: len(x[1])):
+            if not node.is_built and node.vertex is None and any(not n.is_built and e.is_continuation(highway_types) for n,e in edges):
                 yield node
 
         yield None
