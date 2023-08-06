@@ -40,7 +40,7 @@ class OSMWay(OSMElement):
         return
 
     def __getitem__(self, position:int)->OSMNode:
-         return self.get_nodes()[position]
+         return self.nodes[position]
     
     def is_closed(self) -> bool:
         return self._node_ids[0] == self._node_ids[-1]
@@ -106,7 +106,6 @@ class OSMWay(OSMElement):
                 self._nodes = list(self._library.get_elements(OSMNode, self._node_ids).values())
             except Exception as e:
                 print(f'Failed to retrieve nodes for {self}.\n{e}')
-                
         return self._nodes
 
     def end_points(self)->tuple[OSMNode]:
