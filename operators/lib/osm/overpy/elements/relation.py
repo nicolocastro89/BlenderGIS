@@ -814,7 +814,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
                 # Take the first encountered free node <freeNode> and
                 # calculated if it is located inside any building from <self.buildings>
                 bvhTree = self._library.bvh_tree
-                p = (node.ray_cast_hit.loc[0], node.ray_cast_hit.loc[1]) if node.ray_cast_hit else self._library.reprojector.pt([(node._lat, node._lon)])
+                p = (node.ray_cast_hit.loc[0], node.ray_cast_hit.loc[1]) if node.ray_cast_hit.hit else self._library.reprojector.pt([(node._lat, node._lon)])
                 # Cast a ray from the point with horizontal coords equal to <coords> and
                 # z = -1. in the direction of <zAxis>
                 buildingIndex = bvhTree.ray_cast((p[0], p[1], -1.), zAxis)[2]
