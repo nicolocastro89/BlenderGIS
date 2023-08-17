@@ -303,27 +303,26 @@ class OSMHighway(OSMWay):
         # fill in the links, where starting and ending node have to either hit the ground or be connected ot another base highway
 
         highway_base_type = self.highway_base_type
-
+        built = set()
         for starting_node in takewhile(lambda x: x is not None , graph.get_unbuilt_nodes([highway_base_type])):
-            self._breadth_first_build_graph(bm, ray_caster=ray_caster, graph=graph, start = starting_node, built = set(), valid_edges = [highway_base_type], build_parameters=build_parameters)
+            self._breadth_first_build_graph(bm, ray_caster=ray_caster, graph=graph, start = starting_node, built = built, valid_edges = [highway_base_type], build_parameters=build_parameters)
         
+        built = set()
+
         for starting_node in takewhile(lambda x: x is not None , graph.get_unbuilt_nodes([highway_base_type+'_link'])):
-            self._breadth_first_build_graph(bm, ray_caster=ray_caster, graph=graph, start = starting_node, built = set(), valid_edges = [highway_base_type+'_link'], build_parameters=build_parameters)
+            self._breadth_first_build_graph(bm, ray_caster=ray_caster, graph=graph, start = starting_node, built = built, valid_edges = [highway_base_type+'_link'], build_parameters=build_parameters)
         
         for highway in built_highways:
             highway.is_built = True
 
     def _breadth_first_build_graph(self, bm:BMesh, ray_caster: DropToGround, graph: HighwayGraph, start:HighwayGraphNode, built:set = None, valid_edges:list(str)=None, build_parameters:dict=None):
 
-        print(f'Setting off breadth first building, starting node is {start.node}')
+        # print(f'Setting off breadth first building, starting node is {start.node}')
         built = built or set()
         valid_edges = valid_edges or []
         build_parameters = build_parameters or {}
         queue = deque()
-        start.is_built = True
-        if start.node.ray_cast_hit.hit:
-            start.vertex = bm.verts.new(start.node.ray_cast_hit.loc)
-            start.vertex[bm.verts.layers.string.get("node")] = str.encode(str(start.node._id))
+        start.build(bm)
         
         built.add(start)
         queue.append(start)
@@ -332,24 +331,19 @@ class OSMHighway(OSMWay):
              
             current_node = queue.popleft()
             for (neighbor, edge) in ( (n,e) for (n,e) in graph.get_valid_neighbors(current_node, valid_edges) if n not in built):
-                # print(f'Looking at {current_node.id} neighbor {neighbor.id} linked by edge {";".join(edge.types)}')
-                l=next((l for l in self._highways_to_level if l in edge.types), None)
-                if l is not None:
+                levelled=next((l for l in self._highways_to_level if l in edge.types), None)
+                if levelled is not None:
                     neighbors = self._leveled_depth_first_build_graph(bm = bm,
                                                                       ray_caster=ray_caster,
                                                                       graph = graph,
                                                                       start_node=current_node,
                                                                       built = built,
-                                                                      valid_edges=valid_edges+[l],
+                                                                      valid_edges=valid_edges+[levelled],
                                                                       build_parameters=build_parameters)
                     queue.extend(neighbors)
                 else:
-                    neighbor.is_built = True
-                    if neighbor.node.ray_cast_hit.hit:
-                      neighbor.vertex = bm.verts.new(neighbor.node.ray_cast_hit.loc)
-                      neighbor.vertex[bm.verts.layers.string.get("node")] = str.encode(str(neighbor.node._id))
+                    neighbor.build(bm)
                     
-                    # else:
                     self._build_highway_graph_edge(start= current_node, end=neighbor, edge = edge, bm=bm, ray_caster=ray_caster, build_parameters=build_parameters)
                     built.add(neighbor)
                     queue.append(neighbor)
@@ -358,7 +352,7 @@ class OSMHighway(OSMWay):
         """
         Used to build leveled (bridge or tunnel) highways and their links
         """
-        print(f'Building leveled bridge starting from {start_node.id}')
+        # print(f'Building leveled bridge starting from {start_node.id}')
         built = built or set()
         valid_edges = valid_edges or None
         build_parameters = build_parameters or None
@@ -367,20 +361,23 @@ class OSMHighway(OSMWay):
 
         # Get all the possible paths and sort them by length
         bfs_explore_result = graph.bfs_explore(start_node, valid_edges = valid_edges)
-        # split the path and cast each id to int
+        # split the path and cast each id to int meanwhile order by length desc
         path_distances = [([int(id) for id in p.split(',')], d ) for p,d in sorted(bfs_explore_result.items(), key=itemgetter(1), reverse=True)]
-        print(f'Found {len(path_distances)} paths')
+        # print(f'Found {len(path_distances)} paths')
+        
         for node in graph.adj_list.keys():
             for path,_ in path_distances:
                 try:
                     path[path.index(node.id)] = node
                 except:
                     continue
+        
         #Build the longest path first
         #longest_distance = max(path_distances.values())
         #longest_path = next(p for p,d in longest_distance.items() if d == longest_distance)
+        
         for longest_path, longest_distance in path_distances:
-            print(f'Analysing path from {longest_path[0].id} to {longest_path[-1].id}')
+            # print(f'Analysing path from {longest_path[0].id} to {longest_path[-1].id}')
             actual_path = []
             longest_to_build = 0
 
@@ -390,7 +387,7 @@ class OSMHighway(OSMWay):
                 try:
                     overlap_truth_index = overlap_truth_list.index(False)
                     
-                    overlap_length = sum(built_path[i].distance2D(built_path[i-1]) for i in range(1,overlap_truth_index+1))
+                    overlap_length = sum(built_path[i-1].distance2D(built_path[i]) for i in range(1,overlap_truth_index))
                     to_build_distance = longest_distance-overlap_length
                     if to_build_distance > longest_to_build:
                         longest_to_build = to_build_distance
@@ -404,9 +401,18 @@ class OSMHighway(OSMWay):
             if longest_to_build == 0:
                 continue
             
-            if not actual_path[0].vertex and actual_path[0].node.ray_cast_hit.hit:
-                actual_path[0].vertex = bm.verts.new(actual_path[0].node.ray_cast_hit.loc)
-            self._build_leveled_path(path=actual_path,
+            actual_path[0].build(bm)
+            
+            if any(graph.get_edge(p1, p2).tags.get('highway','').endswith('_link') for p1, p2 in zip(path[:-1],path[1:])):
+                self._build_link(path=actual_path,
+                                    path_length=longest_to_build,
+                                    graph = graph,
+                                    built= built,
+                                    bm=bm,
+                                    ray_caster=ray_caster,
+                                    build_parameters=build_parameters)
+            else:
+                self._build_leveled_path(path=actual_path,
                                     path_length=longest_to_build,
                                     graph = graph,
                                     built= built,
@@ -426,7 +432,8 @@ class OSMHighway(OSMWay):
         return neighbors        
     
     def _build_leveled_path(self, path: list[HighwayGraphNode], path_length: float, graph: HighwayGraph, built: set[HighwayGraphNode], bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None):
-        print('\t'+f'building path starting at {path[0].id} and ending at {path[-1].id}')
+        # print('\t'+f'building path starting at {path[0].id} and ending at {path[-1].id}')
+        
         build_parameters = build_parameters or {}
         max_delta = 0
 
@@ -439,66 +446,148 @@ class OSMHighway(OSMWay):
                 vertical_distance = ip1[2]-ip2[2]
                 max_delta = max(max_delta, abs(vertical_distance/traveled_distance))
 
-        print(f'MAX DELTA FOR LEVELLED PATH IS {max_delta}')
+
+        # Find the height of the first and last node to actually hit the ground
         starting_height = next((p.node.ray_cast_hit.loc[2] for p in path if p.node.ray_cast_hit.hit), 0)
         ending_height = next((p.node.ray_cast_hit.loc[2] for p in reversed(path) if p.node.ray_cast_hit.hit), 0)
 
-        if path[0].node.ray_cast_hit.hit and not path[-1].node.ray_cast_hit.hit:
-            ending_height = starting_height
-        if path[-1].node.ray_cast_hit.hit and not path[0].node.ray_cast_hit.hit:
-            starting_height = ending_height
+        
+        slope = (ending_height-starting_height)/path_length
+        total_traveled_distance = 0
+        layer_access_ramp_length = build_parameters.get('layer_acccess_ramp_length',50.)
+        # do a uniform slope from one endpoint to the other
+        for previous_graph_node, current_graph_node in zip(path[:-1],path[1:]):
+            # This part is done at the beginning to make sure the traveled path is kept up to date even if the node
+            #falls outside the area
+            traveled_distance = previous_graph_node.distance2D(current_graph_node)
+            
+            total_traveled_distance += traveled_distance
 
-        delta_z = (ending_height-starting_height)/path_length
+            if not current_graph_node.node.ray_cast_hit.hit:
+                current_graph_node.vertex = None
+                current_graph_node.is_built = True
+                built.add(current_graph_node)
+                continue
+
+            edge = graph.get_edge(previous_graph_node, current_graph_node)
+                
+            current_graph_node.build(bm)
+            built.add(current_graph_node)
+            
+            if current_graph_node.vertex is None:
+                continue
+            
+            current_graph_node.vertex.co[2] = starting_height + slope*total_traveled_distance 
+
+            built_vertices = self._build_highway_graph_edge(start= previous_graph_node, end=current_graph_node, edge = None, bm=bm, ray_caster=ray_caster, build_parameters=build_parameters)
+            edge.vertices = built_vertices
+
+            #Align the points along the previous and current vertex
+            
+            for i, built_vertex in enumerate(edge.vertices, 1):
+                if previous_graph_node.vertex is None:
+                    height_shift = 0
+                else:
+                    distance_from_end = current_graph_node.distance2D(previous_graph_node)
+
+                    height_shift = (len(built_vertices)-i)/(len(built_vertices)+1) * (current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
+
+                built_vertex.co[2] = current_graph_node.vertex.co[2] - height_shift
+
+        points_below = sum((1 for p in path if p.vertex is not None and p.vertex.co[2]-p.node.ray_cast_hit.loc[2]<2))
+        
+
+        if points_below/len(path)>0.1:
+            total_traveled_distance = 0
+            
+            for previous_graph_node, current_graph_node in zip(path[:-1],path[1:]):
+                if current_graph_node.vertex is None:
+                    continue
+                edge = graph.get_edge(previous_graph_node,current_graph_node)
+                
+                layer_height = int(edge.tags.get('layer', 1)) * build_parameters.get('layer_default_height',10)
+
+                traveled_distance = previous_graph_node.distance2D(current_graph_node)
+                
+                total_traveled_distance += traveled_distance
+                
+                distance_from_end = min([abs(total_traveled_distance-path_length),total_traveled_distance, layer_access_ramp_length])
+                ramp_ratio = distance_from_end/layer_access_ramp_length
+
+                minimal_ramp_height = ramp_ratio*layer_height
+                actual_z = max(current_graph_node.vertex.co[2], current_graph_node.node.ray_cast_hit.loc[2] + minimal_ramp_height)
+
+                current_graph_node.vertex.co[2] = actual_z
+
+
+                for i, built_vertex in enumerate(edge.vertices, 1):
+                    distance_from_end = (built_vertex.co.xy-current_graph_node.vertex.co.xy).length
+                    if previous_graph_node.vertex is None:
+                        z_shift = 0
+                    else:
+                        z_shift = (len(edge.vertices)-i)/(len(edge.vertices)+1) * (current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
+                    
+                    built_vertex.co[2] = current_graph_node.vertex.co[2] - z_shift
+
+    def _build_link(self, path: list[HighwayGraphNode], path_length: float, graph: HighwayGraph, built: set[HighwayGraphNode], bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None):
+        build_parameters = build_parameters or {}
+
+        # Find the height of the first and last node to actually hit the ground
+        starting_height = next((p.vertex.co[2] if p.vertex else p.node.ray_cast_hit.loc[2] for p in path if p.node.ray_cast_hit.hit), 0)
+        ending_height = next((p.vertex.co[2] if p.vertex else p.node.ray_cast_hit.loc[2] for p in reversed(path) if p.node.ray_cast_hit.hit), 0)
+
+        slope = (ending_height-starting_height)/path_length
         total_traveled_distance = 0
 
-        layer_access_ramp_length = build_parameters.get('layer_acccess_ramp_length',50.)
         for previous_graph_node, current_graph_node in zip(path[:-1],path[1:]):
-            edge = next(e for n,e in graph.adj_list[previous_graph_node] if n.id == current_graph_node.id)
-            layer_height = int(edge.tags.get('layer', 0)) * build_parameters.get('layer_default_height',10)
-            current_graph_node.is_built=True
-            built.add(current_graph_node)
-
+            # This part is done at the beginning to make sure the traveled path is kept up to date even if the node
+            #falls outside the area
             traveled_distance = ((previous_graph_node.node.ray_cast_hit.loc[0]-current_graph_node.node.ray_cast_hit.loc[0])**2 + 
                                   (previous_graph_node.node.ray_cast_hit.loc[1]-current_graph_node.node.ray_cast_hit.loc[1])**2)**0.5
-            vertical_distance = previous_graph_node.node.ray_cast_hit.loc[2]-current_graph_node.node.ray_cast_hit.loc[2]
 
             total_traveled_distance += traveled_distance
-            
-            distance_from_end = min([abs(traveled_distance-path_length),path_length-traveled_distance, layer_access_ramp_length])
-            ramp_ratio = distance_from_end/layer_access_ramp_length
-
-            
-            if max_delta>0.3:
-                actual_z = starting_height + delta_z*total_traveled_distance
-                print(f'BIG GROUND DROP GOING STRAIGHT WITH HEIGHT {actual_z}')
-            else:
-                minimal_ramp_height = ramp_ratio*layer_height
-                actual_z = starting_height + max(delta_z*total_traveled_distance, minimal_ramp_height)
-                print(f'SMALL GROUND DROP GOING UP TO {layer_height} ({ramp_ratio}%) actual_z')
-            
-            current_graph_node.node.ray_cast_hit.loc[2] = actual_z # + ramp_ratio*layer_height
 
             if not current_graph_node.node.ray_cast_hit.hit:
                 current_graph_node.vertex = None
                 continue
 
-            current_graph_node.vertex = bm.verts.new(current_graph_node.node.ray_cast_hit.loc)
-            current_graph_node.vertex[bm.verts.layers.string.get("node")] = str.encode(str(current_graph_node.node._id))
+            edge = next(e for n,e in graph.adj_list[previous_graph_node] if n.id == current_graph_node.id)
+                
+            # layer_height = int(edge.tags.get('layer', 0)) * build_parameters.get('layer_default_height',10)
+            current_vertex = current_graph_node.build(bm)
+            built.add(current_graph_node)
+            if current_vertex is None:
+                continue
+
+            
+            # if max_delta>0.3:
+            actual_z = starting_height + slope*total_traveled_distance
+            #     print(f'BIG GROUND DROP GOING STRAIGHT WITH HEIGHT {actual_z}')
+            # else:
+            #     minimal_ramp_height = ramp_ratio*layer_height
+            #     actual_z = starting_height + max(delta_z*total_traveled_distance, minimal_ramp_height)
+            #     print(f'SMALL GROUND DROP GOING UP TO {layer_height} ({ramp_ratio}%) actual_z')
+            
+            current_vertex.co[2] = actual_z # + ramp_ratio*layer_height
 
             built_vertices = self._build_highway_graph_edge(start= previous_graph_node, end=current_graph_node, edge = None, bm=bm, ray_caster=ray_caster, build_parameters=build_parameters)
-            
+            edge.vertices = built_vertices
+
+            #Align the points along the previous and current vertex
             for i, built_vertex in enumerate(built_vertices, 1):
-                distance_from_end = ((built_vertex.co[0]-current_graph_node.vertex.co[0])**2 + 
-                                  (built_vertex.co[1]-current_graph_node.vertex.co[1])**2)**0.5
                 if previous_graph_node.vertex is None:
-                    z = current_graph_node.vertex.co[2]
+                    height = 0
                 else:
-                    z = (len(built_vertices)-i)/(len(built_vertices)+1) *(current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
+                    # ((built_vertex.co[0]-current_graph_node.vertex.co[0])**2 + 
+                    #               (built_vertex.co[1]-current_graph_node.vertex.co[1])**2)**0.5
+
+                    height = (len(built_vertices)-i)/(len(built_vertices)+1) * (current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
                     # print(f'Bridging between {current_graph_node.vertex.co[2]}-{previous_graph_node.vertex.co[2]} ration {i/(len(built_vertices)+1)} height {z} setting it to {starting_height + z}')
                 #distance_from_end/traveled_distance * (current_graph_node.vertex.co[2] - previous_graph_node.vertex.co[2])
                 #print(f'distance from end {distance_from_end} end nodes have height: {previous_graph_node.vertex.co[2]}-{current_graph_node.vertex.co[2]} ratio {distance_from_end/traveled_distance} height {z} from {starting_height}')
-                built_vertex.co[2] = current_graph_node.vertex.co[2] - z
-            
+                built_vertex.co[2] = current_graph_node.vertex.co[2] - height
+
+
     def _build_highway_graph_edge(self, start: HighwayGraphNode, end:HighwayGraphNode, edge: HighwayGraphEdge, bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None)->list[BMVert]:
         # print(f'building edge between {start.id} and {end.id}')
         build_parameters = build_parameters or {}
@@ -577,12 +666,12 @@ class OSMTrunk(OSMHighWaySubType):
     _osm_highway_type: str = 'trunk'
     detail_level: ClassVar[int] = 3
 
-class OSMTrunkLink(OSMHighWaySubType):
-    """
-    The most important roads in a country's system that aren't motorways. (Need not necessarily be a divided highway.)
-    """
-    _osm_highway_type: str = 'trunk_link'
-    detail_level: ClassVar[int] = 3
+# class OSMTrunkLink(OSMHighWaySubType):
+#     """
+#     The most important roads in a country's system that aren't motorways. (Need not necessarily be a divided highway.)
+#     """
+#     _osm_highway_type: str = 'trunk_link'
+#     detail_level: ClassVar[int] = 3
 
 class OSMPrimary(OSMHighWaySubType):
     """
@@ -591,12 +680,12 @@ class OSMPrimary(OSMHighWaySubType):
     _osm_highway_type: str = 'primary'
     detail_level: ClassVar[int] = 3
 
-class OSMPrimaryLink(OSMHighWaySubType):
-    """
-    The next most important roads in a country's system. (Often link larger towns.)	
-    """
-    _osm_highway_type: str = 'primary_link'
-    detail_level: ClassVar[int] = 3
+# class OSMPrimaryLink(OSMHighWaySubType):
+#     """
+#     The next most important roads in a country's system. (Often link larger towns.)	
+#     """
+#     _osm_highway_type: str = 'primary_link'
+#     detail_level: ClassVar[int] = 3
 
 class OSMSecondary(OSMHighWaySubType):
     """
@@ -605,12 +694,12 @@ class OSMSecondary(OSMHighWaySubType):
     _osm_highway_type: str = 'secondary'
     detail_level: ClassVar[int] = 3
 
-class OSMSecondaryLink(OSMHighWaySubType):
-    """
-    The next most important roads in a country's system. (Often link towns.)		
-    """
-    _osm_highway_type: str = 'secondary_link'
-    detail_level: ClassVar[int] = 3
+# class OSMSecondaryLink(OSMHighWaySubType):
+#     """
+#     The next most important roads in a country's system. (Often link towns.)		
+#     """
+#     _osm_highway_type: str = 'secondary_link'
+#     detail_level: ClassVar[int] = 3
 
 class OSMTertiary(OSMHighWaySubType):
     """
@@ -619,12 +708,12 @@ class OSMTertiary(OSMHighWaySubType):
     _osm_highway_type: str = 'tertiary'
     detail_level: ClassVar[int] = 3
 
-class OSMTertiaryLink(OSMHighWaySubType):
-    """
-    The next most important roads in a country's system. (Often link smaller towns and villages)			
-    """
-    _osm_highway_type: str = 'tertiary_link'
-    detail_level: ClassVar[int] = 3
+# class OSMTertiaryLink(OSMHighWaySubType):
+#     """
+#     The next most important roads in a country's system. (Often link smaller towns and villages)			
+#     """
+#     _osm_highway_type: str = 'tertiary_link'
+#     detail_level: ClassVar[int] = 3
 
 class OSMUnclassified(OSMHighWaySubType):
     """
@@ -744,12 +833,33 @@ class HighwayGraphNode():
 
     def distance2D(self, other: HighwayGraphNode)->float:
         return ((self.x-other.x)**2+(self.y-other.y)**2)**0.5
+    
+    def build(self, bm: BMesh)->BVert:
+        self.is_built = True
+        
+        if self.vertex is None and self.node.ray_cast_hit.hit:
+            self.vertex = bm.verts.new(self.node.ray_cast_hit.loc)
+            self.vertex[bm.verts.layers.string.get("node")] = str.encode(str(self.node._id))
+        return self.vertex
 
 class HighwayGraphEdge():
     length:float
     tags:dict
     types=set()
     is_built = False
+
+    vertices:list['BVert'] = []
+
+    def vertices_from(self, starting_node:OSMNode):
+        if starting_node.vertex is None:
+            return None
+        for edge in starting_node.vertex.link_edges():
+            other_vertex = edge.other_vert(starting_node.vertex)
+            if other_vertex==self.vertices[0]:
+                return self.vertices
+            elif other_vertex==self.vertices[-1]:
+                return reversed(self.vertices)
+        return None
 
     def is_continuation(self, required_tags:list)->bool:
         return all(t in self.types for t in required_tags)
@@ -791,6 +901,9 @@ class HighwayGraph():
         if not any(n == node_1 for n,_ in self.adj_list.get(node_2,[])):
             self.adj_list.setdefault(node_2,[]).append((node_1,edge))
 
+    def get_edge(self, v1:OSMNode, v2:OSMNode)->HighwayGraphEdge:
+        return next((e for n,e in self.adj_list.get(v1) if n==v2), None)
+    
     def _node_distance(self, v1:HighwayGraphNode, v2:HighwayGraphNode)->float:
         return math.sqrt((v1.x-v2.x)**2 + (v1.y-v2.y)**2)
     
@@ -817,7 +930,7 @@ class HighwayGraph():
         """
         Get list of all possible paths by length. 
         """
-        print(f'BFS explore starting from {start_node.id} and searching for edges of type {";".join(valid_edges)}')
+        # print(f'BFS explore starting from {start_node.id} and searching for edges of type {";".join(valid_edges)}')
         #visited = set()
         queue = deque()
         queue.append([str(start_node.id)])
@@ -858,7 +971,6 @@ class HighwayGraph():
 
     def get_unbuilt_nodes(self, highway_types:list = []):
         for node,edges in sorted(self.adj_list.items(), key=lambda x: len(x[1])):
-            if not node.is_built and node.vertex is None and any(not n.is_built and e.is_continuation(highway_types) for n,e in edges):
+            if any(not n.is_built and e.is_continuation(highway_types) for n,e in edges): #not node.is_built and 
                 yield node
-
         yield None
