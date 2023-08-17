@@ -261,7 +261,8 @@ class OSMBridge(OSMManMade):
         for vert in verts:
             _, match_idx, _ = kd_tree.find(co = vert.co, 
                                             filter = lambda idx: bvh_tree.ray_cast(supported_highway_nodes[idx].co, direction)[0] is not None)
-            vert.co.z = supported_highway_nodes[match_idx].co.z
+            if match_idx:
+                vert.co.z = supported_highway_nodes[match_idx].co.z
 
         offset = build_parameters.get('bridge_height', 5)
         
