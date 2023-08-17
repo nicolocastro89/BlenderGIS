@@ -151,7 +151,11 @@ class OSMBuilding(OSMWay):
 
         roof_builder_type = OSMRoof.get_roof_builder(self) or OSMFlatRoof
         roof_builder = roof_builder_type(self)
-        roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
+        try:
+            roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
+        except:
+            roof_builder = OSMFlatRoof(self)
+            roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
         return bm
     
     def add_part(self, part: OSMBuildingPart):
@@ -712,6 +716,7 @@ class OSMHippedRoof(OSMRoof):
         #         v.co.z = roof_level + (roof_level-v.co.z)
             
         bm.from_mesh(dest_mesh)
+
         # for f in bm.faces:
         #     f.normal_update()
 
