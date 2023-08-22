@@ -293,6 +293,7 @@ class OSMBridge(OSMManMade):
             kd.balance()
             for structure in self.get_referenced_from(OSMBridgeSupport):
                 self._library.get_element_by_id(structure)._build_instance(bm, geoscn, reproject, ray_caster, lower_verts, kd, build_parameters)
+                
         bmesh.ops.triangulate(bm, faces=bm.faces, quad_method='BEAUTY', ngon_method='BEAUTY')
         return bm
     

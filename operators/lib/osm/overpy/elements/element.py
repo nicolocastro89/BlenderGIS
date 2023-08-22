@@ -46,7 +46,7 @@ class OSMElement(ABC):
     _is_preprocessed: bool = False
     _is_built: bool = False
 
-    _referenced_by: dict[type, set[int]] = {}
+    _referenced_by: dict[type, set[int]]
 
     _blender_element = None
 
@@ -91,6 +91,7 @@ class OSMElement(ABC):
         self._tags = kwargs.get("tags", {})
         self._blender_element = None
         self._library.add_element(self)
+        self._referenced_by = {}
         return
 
     def merge(self, original: OSMElement):

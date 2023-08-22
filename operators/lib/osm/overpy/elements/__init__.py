@@ -7,6 +7,7 @@ from .relation import OSMMultiPolygonBuildingPartRelation, OSMMultiPolygonBuildi
 from .element import OSMElement
 from .node import OSMNode
 from .way import OSMWay
+from .railway import OSMRailway
 
 from typing import TypeVar, Literal
 from .. import OSMLibrary
@@ -18,6 +19,7 @@ _existing_elements:list[T] = [
     OSMRelation, 
     OSMWay, 
     OSMHighway,
+    OSMRailway,
     OSMBridge,
     OSMBuilding, 
     OSMBuildingPart, 

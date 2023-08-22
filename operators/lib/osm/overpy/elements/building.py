@@ -149,15 +149,20 @@ class OSMBuilding(OSMWay):
         else:
             bmesh.ops.translate(bm, verts=verts, vec=vect)
 
+        self.build_roof(bm, verts, edges, build_parameters)
+        
+        return bm
+    
+    def build_roof(self, bm:BMesh, roof_verts:list[BMVert], roof_edges:list[BMEdge], build_parameters:dict):
         roof_builder_type = OSMRoof.get_roof_builder(self) or OSMFlatRoof
         roof_builder = roof_builder_type(self)
         try:
-            roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
-        except:
+            roof_builder.build_roof(bm = bm, roof_verts = roof_verts, roof_edges = roof_edges, build_parameters=build_parameters)
+        except Exception as e:
+            print(f'Failed to build the desired roof {roof_builder_type} becuase of {e}. Falling back on FlatRoof')
             roof_builder = OSMFlatRoof(self)
-            roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
-        return bm
-    
+            roof_builder.build_roof(bm = bm, roof_verts = roof_verts, roof_edges = roof_edges, build_parameters=build_parameters)
+
     def add_part(self, part: OSMBuildingPart):
         if part not in self._parts:
             self._parts.append(part)
@@ -336,9 +341,8 @@ class OSMBuildingPart(OSMBuilding):
         else:
             bmesh.ops.translate(bm, verts=verts, vec=vect)
 
-        roof_builder_type = OSMRoof.get_roof_builder(self) or OSMFlatRoof
-        roof_builder = roof_builder_type(self)
-        roof_builder.build_roof(bm = bm, roof_verts = verts, roof_edges = edges, build_parameters=build_parameters)
+        
+        self.build_roof(bm, verts, edges, build_parameters)
         return bm
 
 class OSMRoof():
