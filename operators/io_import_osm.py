@@ -68,14 +68,14 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 		#all tagged nodes
 		if 'node' in types:
 			if tags:
-				union += ';'.join( ['node['+tag+']' for tag in tags] ) + ';'
+				union += ';'.join( ['node['+tag+'][!"construction"]' for tag in tags] ) + ';'
 			else:
 				union += 'node;'
 		#all tagged ways with all their nodes (recurse down)
 		if 'way' in types:
 			union += '(('
 			if tags:
-				union += ';'.join( [f'way[\"{tag}\"]' if any(c in tag for c in escape_chars) else f'way[{tag}]'for tag in tags] ) + ';);'
+				union += ';'.join( [f'way[\"{tag}\"][!"construction"]' if any(c in tag for c in escape_chars) else f'way[{tag}]'for tag in tags] ) + ';);'
 			else:
 				union += 'way;);'
 			union += '>;);'
@@ -84,7 +84,7 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 			union += 'relation;' #>;
 		union += ')'
 
-		output = ';out;'
+		output = f';out;'
 		qry = head + union + output
 
 		return qry
