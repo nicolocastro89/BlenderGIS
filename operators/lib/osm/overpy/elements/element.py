@@ -14,6 +14,7 @@ from mathutils import Vector
 from mathutils.kdtree import KDTree
 
 from .....utils.bgis_utils import DropToGround
+import bpy
 
 if TYPE_CHECKING:
     from ..OSMLibrary import OSMLibrary
@@ -29,7 +30,7 @@ class OSMElement(ABC):
     xAxis = Vector((1., 0., 0.))
     yAxis = Vector((0., 1., 0.))
     zAxis = Vector((0., 0., 1.))
-
+    blender_mesh_name: ClassVar[str] = "Elements"
     _osm_name: ClassVar[str] = 'element'
     detail_level: ClassVar[int] = 0
 
@@ -160,13 +161,14 @@ class OSMElement(ABC):
         return
 
     @classmethod
-    def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={}) -> None:
+    def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={}) -> set[bpy.types.Object]:
         pr = cProfile.Profile()
         pr.enable()
+        built_objects = []
         for part in library.get_elements(cls).values():
             if part.is_built or not part._is_valid:
                 continue
-            part.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)
+            built_objects.append(part.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters))
         pr.disable()
         s = io.StringIO()
         sortby = SortKey.CUMULATIVE
@@ -174,7 +176,11 @@ class OSMElement(ABC):
         ps.print_stats()
         print(f'Profile of {cls} building')
         print(s.getvalue())
-        return
+        # obj = bpy.data.objects.new("top layey",None)
+        # geoscn.scn.collection.objects.link(obj)
+        # obj.select_set(True)
+
+        return set(filter(lambda item: item is not None, built_objects))
     
     def build_instance(self, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={}) -> bpy.types.Object|None:
         return

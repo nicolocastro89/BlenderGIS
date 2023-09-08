@@ -19,6 +19,7 @@ class OSMNode(OSMElement):
     ''' A node is one of the core elements in the OpenStreetMap data model. 
     It consists of a single point in space defined by its latitude, longitude and node id.
     '''
+    blender_mesh_name: ClassVar[str] = "Node"
     _osm_name: ClassVar[str] = 'node'
     detail_level: ClassVar[int] = 1
 

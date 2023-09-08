@@ -1,3 +1,4 @@
+import math
 import os
 import time
 import json
@@ -19,9 +20,10 @@ from ..geoscene import GeoScene
 from .utils import adjust3Dview, getBBOX, DropToGround, isTopView
 
 from ..core.proj import Reproj, reprojBbox, reprojPt, utm
-from ..core.utils import perf_clock
+from ..core.utils import perf_clock,BBOX
 
 from ..core import settings
+from .utils import solidify_terrain
 USER_AGENT = settings.user_agent
 
 PKG, SUBPKG = __package__.split('.', maxsplit=1)
@@ -524,9 +526,6 @@ class OSM_IMPORT():
 					bpy.data.collections.remove(relation)
 
 
-
-
-
 #######################
 
 class IMPORTGIS_OT_osm_file(Operator, OSM_IMPORT):
@@ -634,6 +633,7 @@ class IMPORTGIS_OT_osm_file(Operator, OSM_IMPORT):
 		
 			result.preprocess(ray_caster=ray_caster)
 			result.build(context, ray_caster=ray_caster, separate = self.separate, build_parameters=build_parameters)
+			solid_terrain = solidify_terrain(elevObj)
 
 		bbox = getBBOX.fromScn(scn)
 		adjust3Dview(context, bbox, zoomToSelect=False)
@@ -646,8 +646,6 @@ class IMPORTGIS_OT_osm_file(Operator, OSM_IMPORT):
 		adjust3Dview(context, bbox)
 
 		return{'FINISHED'}
-
-
 
 
 ########################
@@ -751,15 +749,207 @@ class IMPORTGIS_OT_osm_query(Operator, OSM_IMPORT):
 		
 			result.preprocess(ray_caster=ray_caster)
 			result.build(context, ray_caster=ray_caster, separate = self.separate, build_parameters=build_parameters)
+			with bpy.context.temp_override(active_object=aObj, object=aObj, selected_objects= [aObj], selected_editable_objects= [aObj]):
+					for modifier in aObj.modifiers:
+						bpy.ops.object.modifier_apply(modifier=modifier.name)
+					terrain_mesh = bmesh.new()
+					terrain_mesh.from_mesh(aObj.data)
+					extrusion = bmesh.ops.extrude_face_region(terrain_mesh, faces=terrain_mesh.faces)
+					for vertex in [v for v in extrusion if isinstance(v,bmesh.types.BMVert)]:
+						vertex.co.z = 0
+					terrain_mesh.to_mesh(aObj)
+					terrain_mesh.free()
+					aObj.update()#calc_edges=True)
+					aObj.validate()
+		bbox = getBBOX.fromScn(scn)
+		adjust3Dview(context, bbox, zoomToSelect=False)
+
+		return {'FINISHED'}
+
+
+########################
+
+class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
+	"""Import from Open Street Map"""
+
+	bl_idname = "importgis.osm_query_pieces"
+	bl_description = 'Query for Open Street Map data covering the current view3d area'
+	bl_label = "Get OSM Pieces"
+	bl_options = {"UNDO"}
+
+	vertical_slices: IntProperty(name='Default Vertical Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
+	horizontal_slices: IntProperty(name='Default Horizontal Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
+
+	def draw(self, context):
+		layout = self.layout
+		row = layout.row()
+		row.prop(self, "featureType", expand=True)
+		row = layout.row()
+		col = row.column()
+		col.prop(self, "filterTags", expand=True)
+		layout.prop(self, 'useElevObj')
+		if self.useElevObj:
+			layout.prop(self, 'objElevLst')
+		layout.prop(self, 'buildingsExtrusion')
+		if self.buildingsExtrusion:
+			layout.prop(self, 'defaultHeight')
+			layout.prop(self, 'randomHeightThreshold')
+			layout.prop(self, 'levelHeight')
+		# layout.prop(self, 'separate')
+		layout.prop(self, 'vertical_slices')
+		layout.prop(self, 'horizontal_slices')
+
+	#special function to auto redraw an operator popup called through invoke_props_dialog
+	def check(self, context):
+		return True
+
+
+	@classmethod
+	def poll(cls, context):
+		return context.mode == 'OBJECT'
+
+
+	def invoke(self, context, event):
+		#workaround to enum callback bug (T48873, T38489)
+		global OSMTAGS
+		OSMTAGS = getTags()
+
+		return context.window_manager.invoke_props_dialog(self)
+
+	def execute(self, context):
+
+		prefs = bpy.context.preferences.addons[PKG].preferences
+		scn = context.scene
+		geoscn = GeoScene(scn)
+		objs = context.selected_objects
+		aObj = context.active_object
+
+		if not geoscn.isGeoref:
+				self.report({'ERROR'}, "Scene is not georef")
+				return {'CANCELLED'}
+		elif geoscn.isBroken:
+				self.report({'ERROR'}, "Scene georef is broken, please fix it beforehand")
+				return {'CANCELLED'}
+
+		if len(objs) == 1 and aObj.type == 'MESH':
+			blender_bbox = getBBOX.fromObj(aObj)
+		elif isTopView(context):
+			blender_bbox = getBBOX.fromTopView(context)
+		else:
+			self.report({'ERROR'}, "Please define the query extent in orthographic top view or by selecting a reference object")
+			return {'CANCELLED'}
+
+		
+		#Get view3d bbox in lonlat
+		full_bbox = reprojBbox(geoscn.crs, 4326, blender_bbox.toGeo(geoscn))
+		complete_query = queryBuilder(full_bbox, tags=list(self.filterTags), types=list(self.featureType), format='xml')
+		v_size = abs(blender_bbox['ymax']-blender_bbox['ymin'])
+		v_slice_size = v_size/self.vertical_slices
+		h_size = abs(blender_bbox['xmax']-blender_bbox['xmin'])
+		h_slice_size = h_size/self.horizontal_slices
+		for q in range(self.vertical_slices*self.horizontal_slices):
+			xq = q%self.horizontal_slices
+			yq = math.floor(q/self.horizontal_slices)
+			lower_x = blender_bbox['xmin']+xq*h_slice_size
+			lower_y = blender_bbox['ymin']+yq*v_slice_size
+			sub_bbox = BBOX(lower_x-100, lower_y-100, lower_x+h_slice_size+100, lower_y+v_slice_size+100)
+			bbox = reprojBbox(geoscn.crs, 4326, sub_bbox.toGeo(geoscn))
+
+			#Set cursor representation to 'loading' icon
+			w = context.window
+			w.cursor_set('WAIT')
+
+			#Download from overpass api
+			log.debug('Requests overpass server : {}'.format(prefs.overpassServer))
+			api = overpy.Overpass(overpass_server=prefs.overpassServer, user_agent=USER_AGENT)
+			query = queryBuilder(bbox, tags=list(self.filterTags), types=list(self.featureType), format='xml')
+			log.debug('Overpass query : {}\n\tFull Query:\n\t{}'.format(query,complete_query)) # can fails with non utf8 chars
+
+			try:
+				result = api.query(query)
+			except Exception as e:
+				log.error("Overpass query failed", exc_info=True)
+				self.report({'ERROR'}, "Overpass query failed, ckeck logs for more infos.")
+				return {'CANCELLED'}
+			else:
+				log.info('Overpass query successful')
+			if isinstance(result, overpy.Result):
+				self.build(context, result, geoscn.crs)
+			elif isinstance(result, OSMLibrary):
+
+				build_parameters = self.get_build_params()
+				if self.useElevObj:
+					if not self.objElevLst:
+						log.error('There is no elevation object in the scene to get elevation from')
+						self.report({'ERROR'}, "There is no elevation object in the scene to get elevation from")
+						return {'FINISHED'}
+				elevObj = scn.objects[int(self.objElevLst)] if self.useElevObj else None
+				result.geo_scene = geoscn
+				try:
+					rprj = Reproj(4326, geoscn.crs)
+					result.reprojector = rprj
+				except Exception as e:
+					log.error('Unable to reproject data', exc_info=True)
+					self.report({'ERROR'},
+								"Unable to reproject data ckeck logs for more infos")
+					return {'FINISHED'}
+
+				ray_caster = DropToGround(scn, elevObj) if elevObj else None
+			
+				result.preprocess(ray_caster=ray_caster)
+				built_list = result.build(context, ray_caster=ray_caster, separate = False, build_parameters=build_parameters)
+				solid_terrain = solidify_terrain(aObj or elevObj)
+				solid_terrain.name = f"Quadrent_{q}"
+				
+				area_type = 'VIEW_3D' # change this to use the correct Area Type context you want to process in
+				areas  = [area for area in bpy.context.window.screen.areas if area.type == area_type]
+
+				if len(areas) <= 0:
+					raise Exception(f"Make sure an Area of type {area_type} is open or visible in your screen!")
+				aObj.select_set(False)
+				with bpy.context.temp_override(area=areas[0], active_object=solid_terrain, edit_object=solid_terrain, object=solid_terrain, selected_objects=built_list + [solid_terrain], selected_editable_objects=built_list + [solid_terrain]):
+					# bpy.ops.object.join()
+					# with bpy.context.temp_override(area=areas[0], active_object=solid_terrain, edit_object = solid_terrain, selected_objects=[solid_terrain], selected_editable_objects=[solid_terrain]):
+					bpy.context.view_layer.objects.active = solid_terrain
+					solid_terrain.select_set(True)
+					print(f'{bpy.context.edit_object}')
+					print(f'{bpy.context.edit_object.type}')
+					print(f'{bpy.context.edit_object.data}')
+					# Ensure the object is in edit mode
+					bpy.ops.object.mode_set(mode='OBJECT')
+					bpy.ops.object.mode_set(mode='EDIT')
+					
+					bpy.ops.mesh.select_all(action = 'SELECT')
+					bpy.ops.mesh.bisect(plane_co=(lower_x, 0.0, 0.0), plane_no=(1.0, 0.0, 0.0), use_fill=True, clear_inner=True, clear_outer=False)
+					bpy.ops.mesh.select_all(action = 'SELECT')
+					bpy.ops.mesh.bisect(plane_co=(lower_x+h_slice_size, 0.0, 0.0), plane_no=(-1.0, 0.0, 0.0), use_fill=True, clear_inner=True, clear_outer=False)
+
+					bpy.ops.mesh.select_all(action = 'SELECT')
+					bpy.ops.mesh.bisect(plane_co=(0.0, lower_y, 0.0), plane_no=(0.0, 1.0, 0.0), use_fill=True, clear_inner=True, clear_outer=False)
+					bpy.ops.mesh.select_all(action = 'SELECT')
+					bpy.ops.mesh.bisect(plane_co=(0.0, lower_y+v_slice_size, 0.0), plane_no=(0.0, -1.0, 0.0), use_fill=True, clear_inner=True, clear_outer=False)
+					bpy.ops.object.mode_set(mode='OBJECT')
+
+					bpy.ops.object.join()
+					solid_terrain.data.polygons.foreach_set('use_smooth',  [False] * len(solid_terrain.data.polygons))
+					solid_terrain.data.update()
+					solid_terrain.select_set(False)
+
+				bpy.context.view_layer.objects.active = aObj
+				aObj.select_set(True)
 
 		bbox = getBBOX.fromScn(scn)
 		adjust3Dview(context, bbox, zoomToSelect=False)
 
 		return {'FINISHED'}
 
+	
+########################
+
 classes = [
 	IMPORTGIS_OT_osm_file,
-	IMPORTGIS_OT_osm_query
+	IMPORTGIS_OT_osm_query,
+	IMPORTGIS_OT_PIECES_osm_query
 ]
 
 def register():

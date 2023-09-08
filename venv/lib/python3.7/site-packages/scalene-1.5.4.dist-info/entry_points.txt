@@ -1,0 +1,3 @@
+[console_scripts]
+scalene = scalene.__main__:main
+

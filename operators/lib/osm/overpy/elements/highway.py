@@ -15,7 +15,7 @@ from typing import ClassVar, TypeVar
 from xml.etree.ElementTree import Element
 
 from .....utils.bgis_utils import DropToGround, RayCastHit
-from .....utils.blender import appendObjectsFromAssets, convert_obj_to_curve, createCollection, almost_overlapping, merge_splines
+from .....utils.blender import appendObjectsFromAssets, convert_obj_to_curve,convert_curve_to_obj, createCollection, almost_overlapping, merge_splines
 from .node import OSMNode
 from .way import OSMWay
 
@@ -51,7 +51,7 @@ class OSMHighway(OSMWay):
     '''A Highway is any kind of road, street or path. This is a base class which should never be directly
     assigned to any element.
     '''
-
+    blender_mesh_name: ClassVar[str] = "Highway"
     _osm_sub_name: ClassVar[str] = 'highway'
     _osm_highway_type: str = None
     _highways_to_level:list[str] = ["bridge", 'tunnel']
@@ -124,7 +124,7 @@ class OSMHighway(OSMWay):
         else:
             collection = bpy.data.collections.get(cls.collectionName)
 
-        bevelObjs = appendObjectsFromAssets(cls.assetFile, collection, 'profile.*')
+        bevelObjs = appendObjectsFromAssets(cls.assetFile, collection, 'profile.*\.[0-9]{3}')
         for bevelObj in bevelObjs:
             bevelObj.hide_viewport = True
             bevelObj.hide_select = True
@@ -180,7 +180,7 @@ class OSMHighway(OSMWay):
                 self.add_reference(OSMBridge, id)
 
     @classmethod
-    def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict=None) -> None:
+    def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict=None) -> set[bpy.types.Object]:
         from .man_made import OSMBridge
         build_parameters = build_parameters or {}
         cls.load_highway_profiles()
@@ -197,6 +197,7 @@ class OSMHighway(OSMWay):
                 bm.verts.layers.string.new('node')
             part._build_highway_with_graph(bm, geoscn, reproject, ray_caster, build_parameters)
 
+        bridge_objects = set()
         for part in (p for p in highways if 'bridge' in p._tags):
             bridges = set(library.get_elements_by_ids([ b for b in part.get_referenced_from(OSMBridge)]))
                         # part._referenced_by.get(OSMBridge, []))
@@ -236,30 +237,33 @@ class OSMHighway(OSMWay):
 
                     bridge_bm.to_mesh(bridge_object.data)
                     bridge_bm.free()
+                    bridge_objects.add(bridge_object)
 
-        
+        highway_objects = set()
         for highway_type,highway_bmesh in meshes.items():
             if len(highway_bmesh.verts)== 0:
                 highway_bmesh.free()
                 continue
-            obj = bpy.context.scene.objects.get(f"OSMHighways_{highway_type}")
-            if obj is None:
-                obj = bpy.data.objects.new(highway_type,bpy.data.meshes.new(highway_type))
-                geoscn.scn.collection.objects.link(obj)
+            highway_type_object = bpy.context.scene.objects.get(f"OSMHighways_{highway_type}")
+            if highway_type_object is None:
+                highway_type_object = bpy.data.objects.new(highway_type,bpy.data.meshes.new(highway_type))
+                geoscn.scn.collection.objects.link(highway_type_object)
 
+            # Assign the mesh to the new object, convert to curve and then back to object
             bmesh.ops.remove_doubles(highway_bmesh, verts=highway_bmesh.verts, dist=0.0001)
-            highway_bmesh.to_mesh(obj.data)
+            highway_bmesh.to_mesh(highway_type_object.data)
             highway_bmesh.free()
-            convert_obj_to_curve(obj)
-            obj.select_set(True)
+            convert_obj_to_curve(highway_type_object)
+            print(f'HIGHWAY IS NOW TYPE {highway_type_object}')
+            highway_type_object.select_set(True)
             # bpy.ops.object.convert(target='CURVE', thickness = 1)
-            obj.data.bevel_object = bpy.data.objects.get(cls._bevel_name(highway_type))
-            if hasattr(obj.data, "bevel_mode"):
-                obj.data.bevel_mode = 'OBJECT'
-            if hasattr(obj.data,"use_fill_caps"):
-                obj.data.use_fill_caps = True
-            # if hasattr(obj.data,"dimensions"):
-            #     obj.data.dimensions = '2D'
+            highway_type_object.data.bevel_object = bpy.data.objects.get(cls._bevel_name(highway_type))
+            if hasattr(highway_type_object.data, "bevel_mode"):
+                highway_type_object.data.bevel_mode = 'OBJECT'
+            if hasattr(highway_type_object.data,"use_fill_caps"):
+                highway_type_object.data.use_fill_caps = True
+            convert_curve_to_obj(highway_type_object)
+            highway_objects.add(highway_type_object)
         
         pr.disable()
         s = io.StringIO()
@@ -268,7 +272,7 @@ class OSMHighway(OSMWay):
         ps.print_stats()
         print(f'Profile of highway building')
         print(s.getvalue())
-        return
+        return highway_objects.union(bridge_objects)
     
     def _get_full_highway_pieces(self, current_piece: OSMHighway, highway_pieces: set(OSMHighway)):
         # get all un built highways starting from the given one which are not already in the provided set and which 
@@ -284,7 +288,6 @@ class OSMHighway(OSMWay):
         highway_pieces.update(unsearched)
         for new_piece in unsearched:
             self._get_full_highway_pieces(new_piece, highway_pieces)
-
 
     def _build_highway_with_graph(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict=None)->bmesh:
         #Get all highways pieces which are either of the same type of links
@@ -565,7 +568,6 @@ class OSMHighway(OSMWay):
                     
                 built_vertex.co[2] = current_graph_node.vertex.co[2] - height_shift
 
-
     def _build_highway_graph_edge(self, start: HighwayGraphNode, end:HighwayGraphNode, edge: HighwayGraphEdge, bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None)->list[BMVert]:
         print(f'building edge between {start.id} and {end.id}')
         build_parameters = build_parameters or {}
@@ -592,7 +594,6 @@ class OSMHighway(OSMWay):
                 print('Edge already exists')
         return built_vertices
             
-
     def _generate_graph(self, bm: bmesh, highways:list())->HighwayGraph:
         graph = HighwayGraph(bm,self.highway_type)
         
@@ -919,18 +920,23 @@ class HighwayGraph():
         while queue:
             current_path = queue.popleft()
             current_node = self.__getitem__(current_path[-1])
+            found_extension = False
             for (neighbor,edge) in self.adj_list[current_node]:
                 # print(f'Looking at neighbor {neighbor.id} which has and edge of type {";".join(edge.types)}')
                 if edge.is_continuation(valid_edges):
                     if str(neighbor.id) not in current_path:
+                        found_extension = True
                         next_path = current_path+[str(neighbor.id)]
                         queue.append(next_path)
                         distances[','.join(next_path)] = distances[','.join(current_path)]+edge.length
+            if found_extension:
+                distances.pop(','.join(current_path),None)
 
-        all_paths = sorted(list(distances.keys()))
-        for i,path in enumerate(all_paths):
-            if any(p.startswith(path) for p in all_paths[i+1:]):
-                distances.pop(path)
+
+        # all_paths = sorted(list(distances.keys()))
+        # for i,path in enumerate(all_paths):
+        #     if any(p.startswith(path) for p in all_paths[i+1:]):
+        #         distances.pop(path)
         return distances
 
 

@@ -217,10 +217,10 @@ def setDisplacer(obj, rast, uvTxtLayer, mid=0, interpolation=False):
 
 class bpyGeoRaster(GeoRaster):
 
-	def __init__(self, path, subBoxGeo=None, useGDAL=False, clip=False, fillNodata=False, raw=False):
+	def __init__(self, path, subBoxGeo=None, useGDAL=False, clip=False, fillNodata=False, raw=False, marine_file_path = None):
 
 		#First init parent class
-		GeoRaster.__init__(self, path, subBoxGeo=subBoxGeo, useGDAL=useGDAL)
+		GeoRaster.__init__(self, path, subBoxGeo=subBoxGeo, useGDAL=useGDAL, marine_file_path = marine_file_path)
 
 		#Before open the raster into blender we need to assert that the file can be correctly loaded and exploited
 		#- it must be in a file format supported by Blender (jpeg, tiff, png, bmp, or jpeg2000) and not a GIS specific format
@@ -235,8 +235,14 @@ class bpyGeoRaster(GeoRaster):
 			#Open the raster as numpy array (read only a subset if we want to clip it)
 			if clip:
 				img = self.readAsNpArray(subset=True)
+				if self.marine_file_path:
+					marine_img = self.readAsNpArray(subset=True, marine=True)
+					img.add_marine_data(marine_data=marine_img)
 			else:
 				img = self.readAsNpArray()
+				if self.marine_file_path:
+					marine_img = self.readAsNpArray(marine=True)
+					img.add_marine_data(marine_data=marine_img)
 
 			#always cast to float because it's the more convenient datatype for displace texture
 			#(will not be normalized from 0.0 to 1.0 in Blender)

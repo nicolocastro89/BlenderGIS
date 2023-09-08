@@ -103,7 +103,7 @@ class OSMRelation(OSMElement):
     A member of a relation can optionally have a role which describes the part that a particular 
     feature plays within a relation.
     '''
-
+    blender_mesh_name: ClassVar[str] = "Relation"
     _osm_name: ClassVar[str] = 'relation'
     _osm_relation_type: ClassVar[str] = None
     _osm_relation_tags: ClassVar["list['str']"] = []

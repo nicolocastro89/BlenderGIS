@@ -19,6 +19,7 @@
 #  All rights reserved.
 #  ***** GPL LICENSE BLOCK *****
 
+import math
 import os
 import io
 import random
@@ -476,3 +477,41 @@ class NpImage():
 		"* Statistics : min {} max {}".format(self.getMin(), self.getMax()),
 		"* Georef & Geometry : \n{}".format(self.georef)
 		])
+
+	def get_interpolated(self, x:float, y:float):
+		try:
+			upper_right_co=(math.floor(x),math.ceil(y))
+			upper_left_co=(math.floor(x),math.floor(y))
+			lower_right_co=(math.ceil(x),math.ceil(y))
+			lower_left_co=(math.floor(x),math.floor(y))
+			upper_right = self.data.data[upper_right_co[0]][upper_right_co[1]]
+			upper_left = self.data.data[upper_left_co[0]][upper_left_co[1]]
+			lower_right = self.data.data[lower_right_co[0]][lower_right_co[1]]
+			lower_left = self.data.data[lower_left_co[0]][lower_left_co[1]]
+			data_value = lower_left+(lower_right-lower_left)*(x%1)+(upper_left-lower_left)*(y%1)+(upper_right-lower_right-upper_left+lower_left)*(x%1)*(y%1)
+
+			upper_right = self.data.mask[upper_right_co[0]][upper_right_co[1]]
+			upper_left = self.data.mask[upper_left_co[0]][upper_left_co[1]]
+			lower_right = self.data.mask[lower_right_co[0]][lower_right_co[1]]
+			lower_left = self.data.mask[lower_left_co[0]][lower_left_co[1]]
+			mask_value = any([upper_right,upper_left,lower_right,lower_left])
+			return data_value,mask_value
+		except Exception as ex:
+			print(f'Trying to get {x},{y} for data with size {self.data.size}')
+			raise ex
+
+	def resize(self, new_size):
+		if new_size[0] == self.data.shape[0] and new_size[1] == self.data.shape[1]:
+			return np.array(self.data.data),np.array(self.data.mask)
+		new_data = np.zeros(new_size, self.dtype)
+		new_mask = np.zeros(new_size, 'bool')
+		for x in range(new_size[0]):
+			for y in range(new_size[1]):
+				new_data[x][y], new_mask[x,y] = self.get_interpolated(x/(new_size[0]-1)*(self.data.shape[0]-1), y/(new_size[1]-1)*(self.data.shape[1]-1))
+		return new_data,new_mask
+	
+	def add_marine_data(self, marine_data):
+		marine_data_resized,marine_mask_resized = marine_data.resize(self.data.shape)
+		mask = marine_data_resized<=0
+		self.data[mask] = marine_data_resized[mask]
+		self.data.mask = marine_mask_resized

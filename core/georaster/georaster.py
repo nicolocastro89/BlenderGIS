@@ -42,12 +42,13 @@ class GeoRaster():
 	'''A class to represent a georaster file'''
 
 
-	def __init__(self, path, subBoxGeo=None, useGDAL=False):
+	def __init__(self, path, subBoxGeo=None, useGDAL=False, marine_file_path = None):
 		'''
 		subBoxGeo : a BBOX object in CRS coordinate space
 		useGDAL : use GDAL (if available) for extract raster informations
 		'''
 		self.path = path
+		self.marine_file_path = marine_file_path
 		self.wfPath = self._getWfPath()
 
 		self.format = None #image file format (jpeg, tiff, png ...)
@@ -56,6 +57,13 @@ class GeoRaster():
 		self.dtype = None #int, uint, float
 		self.nbBands = None #number of bands
 		self.noData = None
+
+		self.marine_format = None #image file format (jpeg, tiff, png ...)
+		self.marine_size = None #raster dimension (width, height) in pixel
+		self.marine_depth = None #8, 16, 32
+		self.marine_dtype = None #int, uint, float
+		self.marine_nbBands = None #number of bands
+		self.marine_noData = None
 
 		self.georef = None
 
@@ -144,6 +152,30 @@ class GeoRaster():
 		except Exception as e:
 			log.warning('Cannot extract georefencing informations from tif tags')#, exc_info=True)
 			pass
+		
+		if self.marine_file_path:
+			tif = Tyf.open(self.marine_file_path)[0]
+			#Warning : Tyf object does not support k in dict test syntax nor get() method, use try block instead
+			self.marine_size = xy(tif['ImageWidth'], tif['ImageLength'])
+			self.marine_nbBands = tif['SamplesPerPixel']
+			self.marine_depth = tif['BitsPerSample']
+			if self.marine_nbBands > 1:
+				self.marine_depth = self.marine_depth[0]
+			sampleFormatMap = {1:'uint', 2:'int', 3:'float', None:'uint', 6:'complex'}
+			try:
+				self.marine_dtype = sampleFormatMap[tif['SampleFormat']]
+			except KeyError:
+				self.marine_dtype = 'uint'
+			try:
+				self.marine_noData = float(tif['GDAL_NODATA'])
+			except KeyError:
+				self.marine_noData = None
+			#Get Georef
+			try:
+				self.marine_georef = GeoRef.fromTyf(tif)
+			except Exception as e:
+				log.warning('Cannot extract georefencing informations from tif tags')#, exc_info=True)
+				pass
 
 
 	def _fromGDAL(self):
@@ -245,12 +277,12 @@ class GeoRaster():
 		'''Get GDAL dataset'''
 		return gdal.Open(self.path, gdal.GA_ReadOnly)
 
-	def readAsNpArray(self, subset=True):
+	def readAsNpArray(self, subset=True, marine = False):
 		'''Read raster pixels values as Numpy Array'''
-
+		path = self.path if not marine else self.marine_file_path
 		if subset and self.subBoxGeo is not None:
 			#georef = GeoRef(self.size, self.pxSize, self.subBoxGeoOrigin, rot=self.rotation, pxCenter=True)
-			img = NpImage(self.path, subBoxPx=self.subBoxPx, noData=self.noData, georef=self.georef, adjustGeoref=True)
+			img = NpImage(path, subBoxPx=self.subBoxPx, noData=self.noData, georef=self.georef, adjustGeoref=True)
 		else:
-			img = NpImage(self.path, noData=self.noData, georef=self.georef)
+			img = NpImage(path, noData=self.noData, georef=self.georef)
 		return img

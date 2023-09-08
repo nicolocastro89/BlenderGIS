@@ -11,7 +11,7 @@ class OSMRailway(OSMHighway):
     '''A Highway is any kind of road, street or path. This is a base class which should never be directly
     assigned to any element.
     '''
-
+    blender_mesh_name: ClassVar[str] = "Railway"
     _osm_sub_name: ClassVar[str] = 'railway'
 
     @property

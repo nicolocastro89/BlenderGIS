@@ -143,6 +143,10 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 
 	buildFaces: BoolProperty(name="Build faces", default=True, description='Build quad faces connecting pixel point cloud')
 
+	marineFilePath: StringProperty(
+		default="",
+		options={'HIDDEN'},
+		)
 	def draw(self, context):
 		#Function used by blender to draw the panel.
 		layout = self.layout
@@ -175,6 +179,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			if self.subdivision == 'mesh':
 				layout.prop(self, 'step')
 			layout.prop(self, 'fillNodata')
+			layout.prop(self, 'marineFilePath')
 		#
 		if self.importMode == 'DEM_RAW':
 			layout.prop(self, 'buildFaces')
@@ -209,7 +214,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 
 	def execute(self, context):
 		prefs = context.preferences.addons[PKG].preferences
-
+		marineFilePath = self.marineFilePath if self.marineFilePath != "" else None
 		bpy.ops.object.select_all(action='DESELECT')
 		#Get scene and some georef data
 		scn = bpy.context.scene
@@ -384,7 +389,7 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 
 			# Load raster
 			try:
-				grid = bpyGeoRaster(filePath, subBoxGeo=subBox, clip=self.clip, fillNodata=self.fillNodata, useGDAL=HAS_GDAL, raw=True)
+				grid = bpyGeoRaster(filePath, subBoxGeo=subBox, clip=self.clip, fillNodata=self.fillNodata, useGDAL=HAS_GDAL, raw=True, marine_file_path=marineFilePath)
 			except IOError as e:
 				log.error("Unable to open raster", exc_info=True)
 				self.report({'ERROR'}, "Unable to open raster, check logs for more infos")

@@ -23,7 +23,7 @@ class OSMWay(OSMElement):
     included within a relations. A way can have between 2 and 2,000 nodes, although it's possible 
     that faulty ways with zero or a single node exist. A way can be open or closed.
     '''
-
+    blender_mesh_name: ClassVar[str] = "HighWayway"
     _osm_name: ClassVar[str] = 'way'
     detail_level: ClassVar[int] = 1
 
@@ -136,7 +136,7 @@ class OSMWay(OSMElement):
 
     def get_points(self, geoscn= None, reproject=None, ray_caster: DropToGround = None)->"list":
         hits = [node.ray_cast_hit for node in self.nodes] 
-        if not all(hits) and any(hits):
+        if not all(h.hit for h in hits) and any(h.hit for h in hits):
             zs = [p.loc.z for p in hits if p.hit]
             meanZ = sum(zs) / len(zs)
             for v in hits:
@@ -162,7 +162,6 @@ class OSMWay(OSMElement):
 
         return subdivided
 
-    
     def get_subdivision_params(self, preceding_point: tuple[float,float,float], current_point:tuple[float,float,float], subdivision_size: Number)->tuple[int, Vector]:
         vec = Vector(current_point) - Vector(preceding_point)
         number_steps = max(math.ceil(vec.length/subdivision_size),1)

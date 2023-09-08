@@ -39,7 +39,7 @@ T = TypeVar('T', bound='OSMBuilding')
 class OSMBuilding(OSMWay):
     '''A building is a man-made structure with a roof, standing more or less permanently in one place
     '''
-
+    blender_mesh_name: ClassVar[str] = "Buildings"
     _osm_sub_name: ClassVar[str] = 'building'
     detail_level: ClassVar[int] = 2
 
@@ -264,8 +264,8 @@ class OSMBuildingPart(OSMBuilding):
         #         self._library.get_element_by_id(candidates[0]).add_part(self)
             
 
-    def build(self, geoscn, reproject, ray_caster = None, build_parameters:dict = {}) -> None:
-        return
+    def build(self, geoscn, reproject, ray_caster = None, build_parameters:dict = {}) -> set:
+        return set()
     
     def build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict = {}) -> None:
         return

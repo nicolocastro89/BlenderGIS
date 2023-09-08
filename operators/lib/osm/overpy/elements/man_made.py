@@ -33,7 +33,7 @@ T = TypeVar('T', bound='OSMManMade')
 class OSMManMade(OSMWay):
     '''A tag for identifying man-made (artificial) structures added to the landscape
     '''
-
+    blender_mesh_name: ClassVar[str] = "ManMade"
     _osm_sub_name: ClassVar[str] = 'man_made'
     _osm_sub_type: ClassVar[str] = ''
     detail_level: ClassVar[int] = -1 #  man made should be n abstract class and should never be used not subclassed

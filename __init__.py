@@ -49,6 +49,7 @@ EXPORT_SHP = True
 GET_DEM = True
 IMPORT_GEORASTER = True
 IMPORT_OSM = True
+IMPORT_OSM_PIECES = True
 IMPORT_SHP = True
 IMPORT_ASC = True
 DELAUNAY = True
@@ -214,6 +215,8 @@ class VIEW3D_MT_menu_gis_webgeodata(bpy.types.Menu):
 			self.layout.operator("view3d.map_start", icon_value=icons_dict["layers"].icon_id)
 		if IMPORT_OSM:
 			self.layout.operator("importgis.osm_query", icon_value=icons_dict["osm"].icon_id)
+		if IMPORT_OSM_PIECES:
+			self.layout.operator("importgis.osm_query_pieces", icon_value=icons_dict["osm"].icon_id)
 		if GET_DEM:
 			self.layout.operator("importgis.dem_query", icon_value=icons_dict["raster"].icon_id)
 
