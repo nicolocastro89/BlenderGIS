@@ -511,7 +511,8 @@ class NpImage():
 		return new_data,new_mask
 	
 	def add_marine_data(self, marine_data):
+		marine_data.data[:] = replace_nans(marine_data.data.data, max_iter=5, tolerance=0.5, kernel_size=2, method='localmean')
 		marine_data_resized,marine_mask_resized = marine_data.resize(self.data.shape)
-		mask = marine_data_resized<=0
+		mask = self.data<=0
 		self.data[mask] = marine_data_resized[mask]
 		self.data.mask = marine_mask_resized
