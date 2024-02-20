@@ -42,7 +42,9 @@ class OSMElement(ABC):
     
     _library: OSMLibrary
 
-    _is_valid: bool = True
+    @property
+    def _is_valid(self)->bool:
+        return True
 
     _is_preprocessed: bool = False
     _is_built: bool = False
