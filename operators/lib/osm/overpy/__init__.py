@@ -3,6 +3,8 @@ from decimal import Decimal
 import re
 import sys
 import os
+
+import requests
 from . import OSMLibrary
 
 from . import exception
@@ -71,32 +73,41 @@ class Overpass(object):
         """
         if not isinstance(query, bytes):
             query = query.encode("utf-8")
-
-        req = Request(self.url)
+        headers ={}
         if self.referer:
-            req.add_header('Referer', self.referer)
+            headers['Referer'] = self.referer
         if self.user_agent:
-            req.add_header('User-Agent', self.user_agent)
+            headers['User-Agent'] = self.user_agent
+        f = requests.request("GET",
+                        self.url,
+                        headers=headers,
+                        data=query)
+        response = f.text
+        # req = Request(self.url)
+        # if self.referer:
+        #     req.add_header('Referer', self.referer)
+        # if self.user_agent:
+        #     req.add_header('User-Agent', self.user_agent)
 
-        try:
-            f = urlopen(req, query, timeout=TIMEOUT)
-        except HTTPError as e:
-            f = e
+        # try:
+        #     f = urlopen(req, query, timeout=TIMEOUT)
+        # except HTTPError as e:
+        #     f = e
 
-        response = f.read(self.read_chunk_size)
-        while True:
-            data = f.read(self.read_chunk_size)
-            if len(data) == 0:
-                break
-            response = response + data
-        f.close()
+        # response = f.read(self.read_chunk_size)
+        # while True:
+        #     data = f.read(self.read_chunk_size)
+        #     if len(data) == 0:
+        #         break
+        #     response = response + data
+        # f.close()
 
-        if f.code == 200:
+        if f.status_code == 200:
             if PY2:
                 http_info = f.info()
                 content_type = http_info.getheader("content-type")
             else:
-                content_type = f.getheader("Content-Type")
+                content_type = f.headers["Content-Type"]
 
             if content_type == "application/json":
                 return self.parse_json(response)
@@ -106,7 +117,7 @@ class Overpass(object):
 
             raise exception.OverpassUnknownContentType(content_type)
 
-        if f.code == 400:
+        if f.status_code == 400:
             msgs = []
             for msg in self._regex_extract_error_msg.finditer(response):
                 tmp = self._regex_remove_tag.sub(b"", msg.group("msg"))
@@ -121,10 +132,10 @@ class Overpass(object):
                 msgs=msgs
             )
 
-        if f.code == 429:
+        if f.status_code == 429:
             raise exception.OverpassTooManyRequests
 
-        if f.code == 504:
+        if f.status_code == 504:
             raise exception.OverpassGatewayTimeout
 
         raise exception.OverpassUnknownHTTPStatusCode(f.code)
