@@ -115,6 +115,10 @@ class OSMRelation(OSMElement):
     members: OrderedDict[int, OSMRelationMember]
 
     @property
+    def _is_valid(self)->bool:
+        return not any(m.element is None for m in self.members.values())
+    
+    @property
     def nodes(self)->list[OSMNode]:
         self._nodes = []
         try:
@@ -204,8 +208,7 @@ class OSMRelation(OSMElement):
             member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
         
-        if any(m.element is None for m in self.members.values()):
-            self._is_valid = False
+        if not self._is_valid:
             return
         
         self.add_reference_to_nodes()
@@ -321,9 +324,12 @@ class OSMMultipolygon(object):
             shifted_vert = itertools.cycle(vertices)
             next(shifted_vert)
             edge_verts = zip(vertices, shifted_vert)
-            edges.extend(
-                bm.edges.new( v )
-                for v in edge_verts)
+            for v in edge_verts:
+                try:
+                    edges.extend(bm.edges.new(v))
+                except:
+                    print(f'Failed to create edge between {v[0]} and {v[1]} in way {way._id}')
+            
         return edges
 
 class OSMMultiPolygonRelation(OSMRelation):
@@ -366,14 +372,14 @@ class OSMMultiPolygonRelation(OSMRelation):
             member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
 
-        if any(m.element is None for m in self.members.values()):
-            self._is_valid = False
+        self.generate_polygons()
+        if not self._is_valid:
             return
         
         for node in self.nodes:
             node.add_reference(self.__class__, self._id)
 
-        self.generate_polygons()
+        
         self._is_preprocessed = True
 
     def generate_polygons(self):
@@ -419,6 +425,19 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
 
     members: OrderedDict[int, OSMRelationMember]
 
+    @property
+    def outline_element(self)->tuple[int, OSMRelationMember]:
+        return next(
+            ((member_id, member)
+             for (member_id, member) in self.members.items()
+             if member.role in ['outline','outer']), (None, None))
+    @property
+    def _is_valid(self)->bool:
+        element = self.outline_element
+        no_outline = element[1] is None or not (
+                isinstance(element[1].element, OSMWay) or
+            (isinstance(element[1], OSMRelation) and 'building' not in element._tags))
+        return super(OSMBuildingRelation, self)._is_valid and not no_outline
     def __str__(self):
         return f"OSMBuildingRelation with id: {self._id}, made up of {len(self.members)} members(s) and tags:\n{pprint.pformat(self._tags)}"
     
@@ -442,8 +461,7 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
             member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
 
-        if any(m.element is None for m in self.members.values()):
-            self._is_valid = False
+        if not self._is_valid:
             return
         
         for node in self.nodes:
@@ -456,10 +474,7 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
              if member.role == 'outline'), (None, None))
         
         # If no no outline is found or outline is not Relation or Building
-        if outline_element is None or not (
-                isinstance(outline_element, OSMBuilding) or
-            (isinstance(outline_element, OSMRelation) and 'building' not in outline_element._tags)):
-            self._is_valid = False
+        if not self._is_valid:
             return
         
         # For each element not outline assign the element and add the element to
@@ -718,7 +733,11 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
         self.polygons = []
         super(OSMMultiPolygonBuildingPartRelation, self).__init__(**kwargs)
         return
-
+    
+    @property
+    def _is_valid(self)->bool:
+        return not any(m.element is None for m in self.members.values())
+    
     @classmethod
     def is_valid_data(cls, element) -> bool:
         return super(OSMMultiPolygonBuildingPartRelation, cls).is_valid_data(element)
@@ -750,8 +769,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
             member_element.preprocess_instance(geoscn, ray_caster)
             self.members[member_element._id].element = member_element
             
-        if any(m.element is None for m in self.members.values()):
-            self._is_valid = False
+        if not self._is_valid:
             return
         
         # for node in self.get_nodes():
