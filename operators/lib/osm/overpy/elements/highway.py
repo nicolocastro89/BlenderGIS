@@ -124,7 +124,7 @@ class OSMHighway(OSMWay):
         else:
             collection = bpy.data.collections.get(cls.collectionName)
 
-        bevelObjs = appendObjectsFromAssets(cls.assetFile, collection, 'profile.*\.[0-9]{3}')
+        bevelObjs = appendObjectsFromAssets(cls.assetFile, collection, 'profile.*') #\.[0-9]{3}')
         for bevelObj in bevelObjs:
             bevelObj.hide_viewport = True
             bevelObj.hide_select = True
@@ -144,9 +144,9 @@ class OSMHighway(OSMWay):
             bridge_ids = [bridges_bvh_tree_indices[idx] for idx in bridge_indices if idx is not None]
             for id in bridge_ids:
                 bridge = library.get_element_by_id(id)
-                print(f'Found bridge {id}')
+                #print(f'Found bridge {id}')
                 if part.layer==bridge.layer:
-                    print(f'Found highway with correct layer for {id}: {part._id}')
+                    #print(f'Found highway with correct layer for {id}: {part._id}')
                     bridge.add_reference(OSMHighway, part._id)
                     part.add_reference(OSMBridge, id)
         
@@ -173,9 +173,9 @@ class OSMHighway(OSMWay):
         bridge_ids = [bridges_bvh_tree_indices[idx] for idx in bridge_indices if idx is not None]
         for id in bridge_ids:
             bridge = self._library.get_element_by_id(id)
-            print(f'Found bridge {id}')
+            #print(f'Found bridge {id}')
             if self.layer==bridge.layer:
-                print(f'Found highway with correct layer for {id}: {self._id}')
+                #print(f'Found highway with correct layer for {id}: {self._id}')
                 bridge.add_reference(OSMHighway, self._id)
                 self.add_reference(OSMBridge, id)
 
@@ -254,7 +254,7 @@ class OSMHighway(OSMWay):
             highway_bmesh.to_mesh(highway_type_object.data)
             highway_bmesh.free()
             convert_obj_to_curve(highway_type_object)
-            print(f'HIGHWAY IS NOW TYPE {highway_type_object}')
+            print(f'HIGHWAY IS NOW TYPE {type(highway_type_object)}')
             highway_type_object.select_set(True)
             # bpy.ops.object.convert(target='CURVE', thickness = 1)
             highway_type_object.data.bevel_object = bpy.data.objects.get(cls._bevel_name(highway_type))
@@ -262,6 +262,8 @@ class OSMHighway(OSMWay):
                 highway_type_object.data.bevel_mode = 'OBJECT'
             if hasattr(highway_type_object.data,"use_fill_caps"):
                 highway_type_object.data.use_fill_caps = True
+            if hasattr(highway_type_object.data,"twist_mode"):
+                highway_type_object.data.twist_mode = 'Z_UP'
             convert_curve_to_obj(highway_type_object)
             highway_objects.add(highway_type_object)
         
@@ -569,7 +571,7 @@ class OSMHighway(OSMWay):
                 built_vertex.co[2] = current_graph_node.vertex.co[2] - height_shift
 
     def _build_highway_graph_edge(self, start: HighwayGraphNode, end:HighwayGraphNode, edge: HighwayGraphEdge, bm:BMesh, ray_caster: DropToGround, build_parameters:dict=None)->list[BMVert]:
-        print(f'building edge between {start.id} and {end.id}')
+        # print(f'building edge between {start.id} and {end.id}')
         build_parameters = build_parameters or {}
         intermediate_points = self.subdivide_way([start.node.ray_cast_hit.loc,end.node.ray_cast_hit.loc], build_parameters.get('highway_subdivision_size', None))[1:-1]
         built_vertices = []
