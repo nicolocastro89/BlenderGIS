@@ -12,7 +12,6 @@ from .elements import ElementFactory
 from typing import TYPE_CHECKING, Type
 if TYPE_CHECKING:
     from .elements import T, OSMNode, OSMElement, OSMRelation, OSMWay, OSMBuilding
-from scalene import scalene_profiler
 
 log = logging.getLogger(__name__)
 
@@ -245,7 +244,6 @@ class OSMLibrary(object):
         # self.bvh_tree = BVHTree.FromPolygons(vertices, polygons)
         # self.bvh_tree_index = bvh_index
 
-    @profile
     def build(self, context, ray_caster:DropToGround, separate:bool, build_parameters: dict = {})->list[bpy.types.Object]:
         prefs = context.preferences.addons[PKG].preferences
         scn = context.scene
@@ -266,17 +264,11 @@ class OSMLibrary(object):
                 print(f'BUULD OBJECTS IS NONE AFTER {element_type}')
             if not separate and len(built_objects)>0:
                 base_object = bpy.context.scene.objects.get(element_type.blender_mesh_name, next(iter(built_objects)))
-                # original_selected = [o for o in bpy.context.scene.objects if o.select_get()]
-                # for o in bpy.context.scene.objects:
-                #     o.select_set(False)
+
                 with bpy.context.temp_override(active_object=base_object, selected_objects=list(built_objects.union([base_object])), selected_editable_objects=list(built_objects.union([base_object]))):
                     bpy.ops.object.join()
                     base_object.name = element_type.blender_mesh_name
-                # for o in original_selected:
-                #     try:
-                #        bpy.context.scene.objects.get(o.name).select_set(True)
-                #     except Exception as e:
-                #         continue 
+               
                 built_objects = [base_object]
 
             osm_built.extend(built_objects)
