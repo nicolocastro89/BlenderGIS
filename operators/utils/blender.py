@@ -15,7 +15,7 @@ def appendObjectsFromFile(filepath, collection, names:list[str]|str):
             data_to.objects = list(names)
         else:
             object_match = re.compile(names)
-            data_to.objects = [obj_name for obj_name in data_from.objects if object_match.match(obj_name) and obj_name not in data_to.objects]
+            data_to.objects = [obj_name for obj_name in data_from.objects if object_match.match(obj_name) and obj_name.split('.')[0] not in data_to.objects]
     if collection:
         # append the objects to the Blender scene
         for obj in data_to.objects:
@@ -209,8 +209,9 @@ def solidify_terrain(elevObj:bmesh.types.Object)->bmesh.types.Object:
     terrain_mesh = bmesh.new()
     terrain_mesh.from_mesh(elevObj.data)
     extrusion = bmesh.ops.extrude_face_region(terrain_mesh, geom=[f for f in terrain_mesh.faces])
+    bbox_corners = min([(elevObj.matrix_world @ Vector(corner)).z for corner in elevObj.bound_box])
     for vertex in [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]:
-        vertex.co.z = 0
+        vertex.co.z = bbox_corners-10
     mesh = bpy.data.meshes.new(f"{elevObj.name}_Solid")
     terrain_mesh.to_mesh(mesh)
     terrain_mesh.free()
@@ -219,3 +220,82 @@ def solidify_terrain(elevObj:bmesh.types.Object)->bmesh.types.Object:
     obj = bpy.data.objects.new(f"{elevObj.name}_Solid", mesh)
     bpy.context.scene.collection.objects.link(obj)
     return obj  
+
+def polish_mesh(bm: bmesh.types.BMesh):
+    # Remove double vertices
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001) #merge vertices less than 1mm
+
+    bmesh.ops.dissolve_limit(bm, verts=bm.verts, edges=bm.edges)
+
+    override = bpy.context.copy()
+    override["selected_objects"] = [bm]
+    override["selected_editable_objects"] = [bm]
+    override["active_object"] = bm
+    override["objects_in_mode"] = [bm]
+    override["object"] = bm
+    override["edit_object"] = bm
+    override['view_layer']=bpy.context.view_layer
+    override["mode"] = 'EDIT_MESH'
+
+    screen = bpy.context.window.screen
+    # bpy.context.view_layer.objects.active = your_object
+    area = next(a for a  in screen.areas if a.type=='VIEW_3D')
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    override["area"] = area
+    override['region'] = region
+    with bpy.context.temp_override(**override):    
+        current_mode = bpy.context.object.mode
+        bpy.ops.object.mode_set(mode='EDIT') 
+        bpy.ops.mesh.select_all(action='SELECT')           
+        bpy.ops.mesh.select_interior_faces()
+        
+        bmesh.ops.delete(bm, geom = [f for f in bm.faces if f.select], context='FACES_ONLY')# 3 is only faces
+        bpy.ops.object.mode_set(mode=current_mode)
+
+def polish_object(obj):
+
+    override = bpy.context.copy()
+    override["selected_objects"] = [obj]
+    override["selectable_objects"] = [obj]
+    override["selected_editable_objects"] = [obj]
+    override["editable_objects"] = [obj]
+    override["active_object"] = obj
+    override["objects_in_mode"] = [obj]
+    override["object"] = obj
+    override["edit_object"] = obj
+    override['view_layer']=bpy.context.view_layer
+    override["mode"] = 'EDIT_MESH'
+
+    screen = bpy.context.window.screen
+    # bpy.context.view_layer.objects.active = your_object
+    area = next(a for a  in screen.areas if a.type=='VIEW_3D')
+    region = next(r for r in area.regions if r.type == 'WINDOW')
+    override["area"] = area
+    override['region'] = region
+    with bpy.context.temp_override(**override):  
+        current_mode = bpy.context.object.mode  
+        bpy.ops.object.mode_set(mode='EDIT')
+        try:
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.remove_doubles(threshold=0.1)
+
+            bpy.ops.mesh.select_all(action='DESELECT')
+        except:
+            pass
+            # print('Failed to select all')
+            # print(f'{bpy.context.selected_objects}')
+            # print(f'{bpy.context.selected_editable_objects}')
+            # print(f'{bpy.context.active_object}')
+            # print(f'{bpy.context.object} {type(bpy.context.object)}')
+        try:
+            bpy.ops.mesh.select_interior_faces()
+            bpy.ops.mesh.delete(type='FACE')
+        except:
+            pass
+            # print('Failed to delete interio faces')
+            # print(f'{bpy.context.selected_objects}')
+            # print(f'{bpy.context.selected_editable_objects}')
+            # print(f'{bpy.context.active_object}')
+            # print(f'{bpy.context.object} {type(bpy.context.object)}')
+        
+        bpy.ops.object.mode_set(mode=current_mode)
