@@ -83,7 +83,7 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 			union += '>;);'
 		#all relations (no filter tag applied)
 		if 'relation' in types or 'rel' in types:
-			union += 'relation;' #>;
+			union += 'relation;(relation[building];>;);' #>;
 		union += ')'
 
 		output = f';out;'
@@ -166,7 +166,7 @@ class OSM_IMPORT():
 	defaultHeight: FloatProperty(name='Default Height', description='Set the height value using for extrude building when the tag is missing', default=20)
 	defaultRoofHeight: FloatProperty(name='Default Roof Height', description='Set the height value using for extrude roof when the tag is missing', default=5)
 	levelHeight: FloatProperty(name='Level height', description='Set a height for a building level, using for compute extrude height based on number of levels', default=3)
-	randomHeightThreshold: FloatProperty(name='Random height threshold', description='Threshold value for randomize default height', default=0)
+	randomHeightThreshold: FloatProperty(name='Random height threshold', description='Threshold value for randomize default height', default=10)
 
 
 
@@ -777,8 +777,10 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 	bl_label = "Get OSM Pieces"
 	bl_options = {"UNDO"}
 
-	vertical_slices: IntProperty(name='Default Vertical Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
-	horizontal_slices: IntProperty(name='Default Horizontal Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
+	vertical_slices: IntProperty(name='Vertical Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
+	horizontal_slices: IntProperty(name='Horizontal Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
+	start_at_quadrant: IntProperty(name='Start at quadrant', description='0 based quadrant to start at', default=0)
+	build_n_quadrants: IntProperty(name='Quadrants to build', description='0number of quadrants to build (-1 means all)', default=-1)
 
 	def draw(self, context):
 		layout = self.layout
@@ -795,9 +797,11 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 			layout.prop(self, 'defaultHeight')
 			layout.prop(self, 'randomHeightThreshold')
 			layout.prop(self, 'levelHeight')
-		# layout.prop(self, 'separate')
+		layout.prop(self, 'separate')
 		layout.prop(self, 'vertical_slices')
 		layout.prop(self, 'horizontal_slices')
+		layout.prop(self, 'start_at_quadrant')
+		layout.prop(self, 'build_n_quadrants')
 
 	#special function to auto redraw an operator popup called through invoke_props_dialog
 	def check(self, context):
@@ -847,7 +851,9 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 		v_slice_size = v_size/self.vertical_slices
 		h_size = abs(blender_bbox['xmax']-blender_bbox['xmin'])
 		h_slice_size = h_size/self.horizontal_slices
-		for q in range(self.vertical_slices*self.horizontal_slices):
+		total_quadrants = self.vertical_slices*self.horizontal_slices
+		final_quadrant = total_quadrants if self.build_n_quadrants==-1 else self.start_at_quadrant+self.build_n_quadrants
+		for q in range(self.start_at_quadrant,final_quadrant):
 			xq = q%self.horizontal_slices
 			yq = math.floor(q/self.horizontal_slices)
 			lower_x = blender_bbox['xmin']+xq*h_slice_size
@@ -930,7 +936,8 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 					bpy.ops.mesh.bisect(plane_co=(0.0, lower_y+v_slice_size, 0.0), plane_no=(0.0, -1.0, 0.0), use_fill=True, clear_inner=True, clear_outer=False)
 					bpy.ops.object.mode_set(mode='OBJECT')
 
-					bpy.ops.object.join()
+					if not self.separate:
+						bpy.ops.object.join()
 					solid_terrain.data.polygons.foreach_set('use_smooth',  [False] * len(solid_terrain.data.polygons))
 					solid_terrain.data.update()
 					solid_terrain.select_set(False)
