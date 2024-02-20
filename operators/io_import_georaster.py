@@ -424,9 +424,10 @@ class IMPORTGIS_OT_georaster(Operator, ImportHelper):
 			if self.subdivision == 'subsurf':#Add subsurf modifier
 				if not 'SUBSURF' in [mod.type for mod in obj.modifiers]:
 					subsurf = obj.modifiers.new('DEM', type='SUBSURF')
-					subsurf.subdivision_type = 'SIMPLE'
-					subsurf.levels = 6
-					subsurf.render_levels = 6
+					subsurf.subdivision_type = 'CATMULL_CLARK'
+					subsurf.levels = 13
+					subsurf.render_levels = 13
+					subsurf.boundary_smooth='PRESERVE_CORNERS'
 			#Set displacer
 			dsp = setDisplacer(obj, grid, uvTxtLayer, interpolation=self.demInterpolation)
 
