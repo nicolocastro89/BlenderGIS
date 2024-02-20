@@ -22,6 +22,8 @@ import bpy, math, bmesh
 from mathutils import Vector, Matrix
 from collections import namedtuple
 
+from .bgis_utils import find_geometric_center
+
 Plane = namedtuple('Plane', 'normal distance')
 
 def normalOfPolygon(vertices):
@@ -469,8 +471,10 @@ class Lightcycle:
             self.slab_intersection.next_slab.slab_intersections.append(self.slab_intersection)
 
 def straightSkeletonOfPolygon(polygon_vertices, mesh_data, height=1.5, tollerance=0.0001):
+    # shift_vertex = find_geometric_center(polygon_vertices)
     if not checkCounterClockwise(polygon_vertices):
         polygon_vertices = polygon_vertices[::-1]
+    polygon_vertices = [v for v in polygon_vertices]
     polygon_normal = normalOfPolygon(polygon_vertices).normalized()
     polygon_plane = Plane(normal=polygon_normal, distance=polygon_vertices[0]@polygon_normal)
     for polygon_vertex in polygon_vertices:
@@ -542,7 +546,7 @@ def straightSkeletonOfPolygon(polygon_vertices, mesh_data, height=1.5, tolleranc
         verts += slab.vertices
         faces.append(range(vert_index, len(verts)))
 
-    mesh_data.from_pydata(verts, edges, faces)
+    mesh_data.from_pydata([v for v in verts], edges, faces)
     return plane_matrix
 
 
