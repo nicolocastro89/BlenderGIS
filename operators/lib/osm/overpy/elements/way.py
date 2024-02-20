@@ -4,7 +4,7 @@ from numbers import Number
 import pprint
 from typing import ClassVar, TypeVar
 from xml.etree.ElementTree import Element
-from .....utils.bgis_utils import DropToGround
+from .....utils.bgis_utils import DropToGround, remove_straight_angles
 
 from .element import OSMElement
 from .node import OSMNode
@@ -145,10 +145,13 @@ class OSMWay(OSMElement):
         pts = [pt.loc for pt in hits]
         return pts 
     
-    def get_vertices(self, bm, geoscn=None, reproject=None, ray_caster: DropToGround = None, subdivision_size: Number = None)->"list":
+    def get_vertices(self, bm, geoscn=None, reproject=None, ray_caster: DropToGround = None, subdivision_size: Number = None, straight_line_toll = None)->"list":
         pts = self.get_points(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
+        if straight_line_toll:
+            pts = remove_straight_angles(pts, straight_line_toll)
         if subdivision_size:
             pts = self.subdivide_way(pts, subdivision_size)
+
         return [bm.verts.new(pt) for pt in pts]                      
 
     def subdivide_way(self, points: list(tuple(float,float,float)), subdivision_size: Number)->list[tuple[float,float,float]]:
