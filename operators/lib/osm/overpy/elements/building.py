@@ -2,15 +2,19 @@ from __future__ import annotations
 from abc import abstractmethod
 from collections import OrderedDict
 import collections
+import random
 import itertools
 import math
 from numbers import Number
 import pprint
 import random
+import sys
+import traceback
 from typing import ClassVar, Type, TypeVar
 from xml.etree.ElementTree import Element
 
 from .....utils.bgis_utils import DropToGround, all_subclasses, find_geometric_center, parse_measurement, remove_straight_angles, find_longest_direction
+from .....utils.blender import polish_mesh, polish_object
 from .....utils.straight_skeleton import straightSkeletonOfPolygon
 from .node import OSMNode
 from .way import OSMWay
@@ -36,6 +40,7 @@ zAxis = Vector((0., 0., 1.))
 T = TypeVar('T', bound='OSMBuilding')
 
 
+
 class OSMBuilding(OSMWay):
     '''A building is a man-made structure with a roof, standing more or less permanently in one place
     '''
@@ -44,7 +49,11 @@ class OSMBuilding(OSMWay):
     detail_level: ClassVar[int] = 2
 
     _parts: list[OSMBuildingPart | OSMMultiPolygonRelation]
-     
+    
+    @property
+    def _is_valid(self)-> bool:
+        return len(self._node_ids)>3
+    
     def __str__(self):
         return f"OSMWay of type building with id: {self._id}, made up of {len(self._node_ids)} nodes(s) and tags:\n{pprint.pformat(self._tags)}"
 
@@ -52,60 +61,8 @@ class OSMBuilding(OSMWay):
         super(OSMBuilding,self).__init__(**kwargs)
         self._parts=[]
 
-    @classmethod
-    def is_valid_xml(cls, xml_element:Element) -> bool:
-        # for c in xml_element.iter('tag'):
-        return super(OSMBuilding, cls).is_valid_xml(xml_element) and any(c.attrib['k'] == cls._osm_sub_name for c in xml_element.iter('tag'))
-
-    @classmethod
-    def is_valid_json(cls, json_element:dict) -> bool:
-        return super(OSMBuilding, cls).is_valid_json(json_element) and cls._osm_sub_name in json_element.get('tags',{})
-
-
-    def build_instance(self, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict = {}) -> bpy.types.Object|None:
-        #Create a new bmesh
-        bm = bmesh.new()
-        if len(self._parts)>0:
-            for part in self._parts:
-                part._build_instance(bm, geoscn=geoscn, reproject = reproject, ray_caster = ray_caster, build_parameters = build_parameters)
-        else:
-            self._build_instance(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
-
-        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
-        mesh = bpy.data.meshes.new(f"{self._id}")
-        bm.to_mesh(mesh)
-        bm.free()
-        mesh.update()#calc_edges=True)
-        mesh.validate()
-        obj = bpy.data.objects.new(f"{self._id}", mesh)
-        geoscn.scn.collection.objects.link(obj)
-        obj.select_set(True)
-        return obj
-            
-    def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
-        plant_verts = self.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
-
-        #This should only be useful for building parts
-        min_height = float(self._tags['min_height']) if 'min_height' in self._tags else float(self._tags.get('min_level',0))*build_parameters.get('level_height',3)
-        bmesh.ops.translate(bm, verts=plant_verts, vec=(0, 0, min_height))
-        
-        #plant edges
-        shifted_vert = itertools.cycle(plant_verts)
-        next(shifted_vert)
-        edges = [
-                bm.edges.new( v )
-                for v in zip(plant_verts,shifted_vert)]
-        
-        face = bm.faces.new(plant_verts)
-        
-        #ensure face is up (anticlockwise order)
-        #because in OSM there is no particular order for closed ways
-        
-        face.normal_update()
-        if face.normal.z > 0:
-            face.normal_flip()
-
-        building_height = None
+    def get_height(self, build_parameters)->int:
+        building_height=0
         if "height" in self._tags:
                 building_height = parse_measurement(self._tags["height"])
                 
@@ -120,12 +77,90 @@ class OSMBuilding(OSMWay):
             except ValueError as e:
                 building_height = None
 
-        if building_height is None:
+        else:
             minH = build_parameters.get('default_height', 30) - build_parameters.get('random_height_threshold', 15)
             if minH < 0 :
                 minH = 0
             maxH = build_parameters.get('default_height', 30) + build_parameters.get('random_height_threshold', 15)
-            building_height = random.randint(minH, maxH)
+            building_height = self._id%(maxH-minH)+minH
+            
+        return building_height
+    
+    @classmethod
+    def is_valid_xml(cls, xml_element:Element) -> bool:
+        # for c in xml_element.iter('tag'):
+        return super(OSMBuilding, cls).is_valid_xml(xml_element) and any(c.attrib['k'] == cls._osm_sub_name for c in xml_element.iter('tag'))
+
+    @classmethod
+    def is_valid_json(cls, json_element:dict) -> bool:
+        return super(OSMBuilding, cls).is_valid_json(json_element) and cls._osm_sub_name in json_element.get('tags',{})
+
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
+        """Preprocess the building  by doing the following in order:
+        - Adding a reference to the way in all nodes referenced
+        """
+        super(OSMBuilding,self).preprocess_instance(geoscn,ray_caster)
+        _is_valid = len(self._node_ids)>3 and self.is_closed()
+        return
+    
+    def build_instance(self, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict = {}) -> bpy.types.Object|None:
+        #Create a new bmesh
+        bm = bmesh.new()
+        if len(self._parts)>0:
+            for part in self._parts:
+                part._build_instance(bm, geoscn=geoscn, reproject = reproject, ray_caster = ray_caster, build_parameters = build_parameters)
+        else:
+            self._build_instance(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
+
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.01)
+        mesh = bpy.data.meshes.new(f"{self._id}")
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()#calc_edges=True)
+        mesh.validate()
+        obj = bpy.data.objects.new(f"{self._id}", mesh)
+        
+        geoscn.scn.collection.objects.link(obj)
+        obj.select_set(True)
+        polish_object(obj)
+        return obj
+            
+    def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+        print(f'building {self._id}')
+        plant_verts = self.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, straight_line_toll=4.5)
+
+        #This should only be useful for building parts
+        min_height = float(self._tags['min_height']) if 'min_height' in self._tags else float(self._tags.get('min_level',0))*build_parameters.get('level_height',3)
+        bmesh.ops.translate(bm, verts=plant_verts, vec=(0, 0, min_height))
+        
+        #plant edges
+        shifted_vert = itertools.cycle(plant_verts)
+        try:
+            next(shifted_vert)
+        except Exception as e:
+            print(self._id)
+            print(e)
+            raise e
+            
+        edges=[]
+        for v in zip(plant_verts,shifted_vert):
+            if v[1] not in [x for y in [a.verts for a in v[0].link_edges] for x in y if x != v[0]]:
+                edges.append(bm.edges.new(v))
+        try:
+            face = bm.faces.new(plant_verts)
+        except:
+            pass
+            #print(f'Face error {self._id}')
+        
+        #ensure face is up (anticlockwise order)
+        #because in OSM there is no particular order for closed ways
+        
+        face.normal_update()
+        if face.normal.z > 0:
+            face.normal_flip()
+
+        building_height = self.get_height(build_parameters=build_parameters)
+        
 
         building_height -=min_height
 
@@ -137,10 +172,18 @@ class OSMBuilding(OSMWay):
         elif build_parameters.get('extrusion_axis', 'Z') == 'Z':
             vect = (0, 0, building_height)
 
-        extrusion = bmesh.ops.extrude_edge_only(bm, edges = edges)
-        # bmesh.ops.extrude_face_region(bm, faces=[face]) #return {'faces': [BMFace]} extrude_edge_only
-        verts = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]
-        edges = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMEdge)]
+        # extrusion = bmesh.ops.extrude_edge_only(bm, edges = edges)
+        extrusion = bmesh.ops.extrude_face_region(bm, geom=[face]) #return {'faces': [BMFace]} extrude_edge_only
+
+        faces = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMFace)]
+        verts = [v for v in faces[0].verts]
+        edges = [e for e in faces[0].edges]
+
+        # extrusion = bmesh.ops.extrude_edge_only(bm, edges = edges)
+        # # bmesh.ops.extrude_face_region(bm, faces=[face]) #return {'faces': [BMFace]} extrude_edge_only
+        # verts = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]
+        # edges = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMEdge)]
+        
         if ray_caster:
             #Making flat roof
             z = max([v.co.z for v in verts]) + building_height #get max z coord
@@ -159,7 +202,9 @@ class OSMBuilding(OSMWay):
         try:
             roof_builder.build_roof(bm = bm, roof_verts = roof_verts, roof_edges = roof_edges, build_parameters=build_parameters)
         except Exception as e:
-            print(f'Failed to build the desired roof {roof_builder_type} becuase of {e}. Falling back on FlatRoof')
+            print(f'Failed to build the desired roof {roof_builder_type} becuase of {e}.')
+            print(traceback.format_exc())
+            print('Falling back on FlatRoof')
             roof_builder = OSMFlatRoof(self)
             roof_builder.build_roof(bm = bm, roof_verts = roof_verts, roof_edges = roof_edges, build_parameters=build_parameters)
 
@@ -297,28 +342,9 @@ class OSMBuildingPart(OSMBuilding):
         if face.normal.z > 0:
             face.normal_flip()
 
-        building_height = None
-        if "height" in self._tags:
-                building_height = parse_measurement(self._tags["height"])
-                
-                roof_height = self._tags.get('roof:height', None)
-                if roof_height:
-                    roof_height = parse_measurement(roof_height)
-                    building_height - roof_height
+        building_height = self.get_height(build_parameters=build_parameters)
 
-        elif "building:levels" in self._tags:
-            try:
-                building_height = int(self._tags["building:levels"]) * build_parameters.get('level_height',3)
-            except ValueError as e:
-                building_height = None
-
-        if building_height is None:
-            minH = build_parameters.get('default_height', 30) - build_parameters.get('random_height_threshold', 15)
-            if minH < 0 :
-                minH = 0
-            maxH = build_parameters.get('default_height', 30) + build_parameters.get('random_height_threshold', 15)
-            building_height = random.randint(minH, maxH)
-
+        
         building_height -=min_height
 
         #Extrude
@@ -329,10 +355,17 @@ class OSMBuildingPart(OSMBuilding):
         elif build_parameters.get('extrusion_axis', 'Z') == 'Z':
             vect = (0, 0, building_height)
 
-        extrusion = bmesh.ops.extrude_edge_only(bm, edges = edges)
-        # bmesh.ops.extrude_face_region(bm, faces=[face]) #return {'faces': [BMFace]} extrude_edge_only
-        verts = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]
-        edges = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMEdge)]
+        # extrusion = bmesh.ops.extrude_edge_only(bm, edges = edges)
+        # # bmesh.ops.extrude_face_region(bm, faces=[face]) #return {'faces': [BMFace]} extrude_edge_only
+        # verts = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]
+        # edges = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMEdge)]
+    
+        extrusion = bmesh.ops.extrude_face_region(bm, geom=[face]) #return {'faces': [BMFace]} extrude_edge_only
+
+        faces = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMFace)]
+        verts = [v for v in faces[0].verts]
+        edges = [e for e in faces[0].edges]
+        
         if ray_caster:
             #Making flat roof
             z = max([v.co.z for v in verts]) + building_height #get max z coord
@@ -710,9 +743,14 @@ class OSMHippedRoof(OSMRoof):
         
         height = self.get_height(build_parameters=build_parameters, **kwargs)
 
-        plane_matrix = straightSkeletonOfPolygon([v.co for v in roof_verts], dest_mesh, height=height, tollerance=0.0001)
+        shift_vertex = find_geometric_center([v.co for v in roof_verts])
+        plane_matrix = straightSkeletonOfPolygon([v.co-shift_vertex for v in roof_verts], dest_mesh, height=height, tollerance=0.0001)
         dest_mesh.transform(plane_matrix)
-
+        bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=0.01)
+        print(type(dest_mesh))
+        for v in dest_mesh.vertices:
+            v.co += shift_vertex
+        # bmesh.ops.translate(dest_mesh, verts=dest_mesh.vertices, vec=shift_vertex)
         # roof_level = min(v.co.z for v in roof_verts)
         # if min(v.co.z for v in dest_mesh.vertices) < roof_level:
         #     roof_level = min(v.co.z for v in roof_verts)
