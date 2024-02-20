@@ -9,6 +9,7 @@ from .....utils.bgis_utils import DropToGround
 from .node import OSMNode
 from .way import OSMWay
 from .highway import OSMHighway
+from .building import OSMPyramidalRoof, OSMFlatRoof
 from mathutils import Vector
 from mathutils.kdtree import KDTree
 
@@ -36,7 +37,7 @@ class OSMManMade(OSMWay):
     blender_mesh_name: ClassVar[str] = "ManMade"
     _osm_sub_name: ClassVar[str] = 'man_made'
     _osm_sub_type: ClassVar[str] = ''
-    detail_level: ClassVar[int] = -1 #  man made should be n abstract class and should never be used not subclassed
+    detail_level: ClassVar[int] = -1 #  man made should be an abstract class and should never be used not subclassed
 
      
     def __str__(self):
@@ -146,7 +147,6 @@ class OSMBreakwater(OSMManMade):
         #bmesh.ops.triangulate(bm, faces=[bottom_face], quad_method='BEAUTY', ngon_method='BEAUTY')
         return bm
     
-
 class OSMBridge(OSMManMade):
 
     @property
@@ -294,7 +294,7 @@ class OSMBridge(OSMManMade):
             for structure in self.get_referenced_from(OSMBridgeSupport):
                 self._library.get_element_by_id(structure)._build_instance(bm, geoscn, reproject, ray_caster, lower_verts, kd, build_parameters)
                 
-        bmesh.ops.triangulate(bm, faces=bm.faces, quad_method='BEAUTY', ngon_method='BEAUTY')
+        # bmesh.ops.triangulate(bm, faces=bm.faces, quad_method='BEAUTY', ngon_method='BEAUTY')
         return bm
     
 class OSMBridgeSupport(OSMManMade):
@@ -414,5 +414,68 @@ class OSMBridgeSupport(OSMManMade):
         
         top_face = bm.faces.new(top_verts)
         self.is_built = True
+        return bm
+    
+class OSMTower(OSMManMade):
+
+    _osm_sub_type: ClassVar[str] = 'tower'
+    detail_level: ClassVar[int] = 3
+
+
+    def __str__(self):
+        return f"OSMManMade of type Breakwater with id: {self._id}, made up of {len(self._node_ids)} nodes(s) and tags:\n{pprint.pformat(self._tags)}"
+
+    def __init__(self, **kwargs):
+        super(OSMTower,self).__init__(**kwargs)
+
+
+    def preprocess_instance(self, geoscn, ray_caster:DropToGround):
+        """
+        """
+        if self._is_preprocessed:
+            return
+        
+        self.add_reference_to_nodes()
+            
+        self._is_preprocessed = True
+        
+
+    
+    def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+        plant_verts = self.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
+        
+
+        # shifted_verts = itertools.cycle(plant_verts)
+        # next(shifted_verts)
+
+        # edges = [bm.edges.new(v) for v in zip(plant_verts, shifted_verts)]
+
+        bottom_face = bm.faces.new(plant_verts)
+        # #ensure face is up (anticlockwise order)
+        # #because in OSM there is no particular order for closed ways
+        bottom_face.normal_update()
+        if bottom_face.normal.z > 0:
+            bottom_face.normal_flip()
+
+        offset = self.tags.get('height',build_parameters.get('tower_height', 35))
+        # bmesh.ops.connect_vert_pair(bm, verts=bottom_face.verts)
+        #Extrude
+        
+
+        extrusion = bmesh.ops.extrude_edge_only(bm, edges = bottom_face.edges)
+        top_verts = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]
+        edges = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMEdge)]
+        for vert in top_verts:
+            vert.co.z = offset
+        
+        roof_builder = OSMPyramidalRoof(self)
+        try:
+            roof_builder.build_roof(bm = bm, roof_verts = top_verts, roof_edges = edges, build_parameters=build_parameters)
+        except Exception as e:
+            print(f'Failed to build the pyramidal roof becuase of {e}. Falling back on FlatRoof')
+            roof_builder = OSMFlatRoof(self)
+            roof_builder.build_roof(bm = bm, roof_verts = top_verts, roof_edges = edges, build_parameters=build_parameters)
+
+        #bmesh.ops.triangulate(bm, faces=[bottom_face], quad_method='BEAUTY', ngon_method='BEAUTY')
         return bm
     
