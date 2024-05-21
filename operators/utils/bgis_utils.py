@@ -227,7 +227,8 @@ def remove_straight_angles(vertices:list[Vector], straight_angle_threshold:Numbe
 			result.append(vertices[i])
 		
 		vertices_queue.rotate(-1)
-
+	if len(result)==0:
+		result=[vertices[0],vertices[-1]]
 	return result
 	
 def find_geometric_center(vertices:list[Vector])->Vector:
