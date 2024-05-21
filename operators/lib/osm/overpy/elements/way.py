@@ -43,8 +43,12 @@ class OSMWay(OSMElement):
          return self.nodes[position]
     
     def is_closed(self) -> bool:
+        return self.closed
+    
+    @property
+    def closed(self) -> bool:
         return self._node_ids[0] == self._node_ids[-1]
-
+    
     @property
     def previous_ways(self) -> list[T]:
         previous = []
@@ -167,6 +171,8 @@ class OSMWay(OSMElement):
 
     def get_subdivision_params(self, preceding_point: tuple[float,float,float], current_point:tuple[float,float,float], subdivision_size: Number)->tuple[int, Vector]:
         vec = Vector(current_point) - Vector(preceding_point)
+        if subdivision_size is None:
+            return 1, vec
         number_steps = max(math.ceil(vec.length/subdivision_size),1)
         return number_steps, vec/number_steps
     
