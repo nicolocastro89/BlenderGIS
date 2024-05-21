@@ -59,6 +59,7 @@ class OSMManMade(OSMWay):
 
     def build_instance(self, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict = {}) -> bpy.types.Object|None:
         #Create a new bmesh
+        print(f'Building {self._id}')
         bm = bmesh.new()
         self._build_instance(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
 
@@ -264,7 +265,7 @@ class OSMBridge(OSMManMade):
             if match_idx:
                 vert.co.z = supported_highway_nodes[match_idx].co.z
 
-        offset = build_parameters.get('bridge_height', 5)
+        offset = build_parameters.get('bridge_thickness', 5)
         
         
 
@@ -457,24 +458,37 @@ class OSMTower(OSMManMade):
         if bottom_face.normal.z > 0:
             bottom_face.normal_flip()
 
-        offset = self.tags.get('height',build_parameters.get('tower_height', 35))
+        building_height = float(self.tags.get('height',build_parameters.get('tower_height', 35)))
         # bmesh.ops.connect_vert_pair(bm, verts=bottom_face.verts)
         #Extrude
         
 
         extrusion = bmesh.ops.extrude_edge_only(bm, edges = bottom_face.edges)
+
+        if build_parameters.get('extrusion_axis', 'Z') == 'NORMAL':
+            normal = bottom_face.normal
+            vect = normal * (-1)*building_height
+        elif build_parameters.get('extrusion_axis', 'Z') == 'Z':
+            vect = (0, 0, building_height)
+
         top_verts = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMVert)]
         edges = [v for v in extrusion['geom'] if isinstance(v,bmesh.types.BMEdge)]
-        for vert in top_verts:
-            vert.co.z = offset
+        if ray_caster:
+            #Making flat roof
+            z = max([v.co.z for v in top_verts]) + building_height #get max z coord
+            for v in top_verts:
+                v.co.z = z
+        else:
+            bmesh.ops.translate(bm, verts=top_verts, vec=vect)
+
         
         roof_builder = OSMPyramidalRoof(self)
         try:
-            roof_builder.build_roof(bm = bm, roof_verts = top_verts, roof_edges = edges, build_parameters=build_parameters)
+            roof_builder.build_roof(bm = bm, roof_verts = top_verts, roof_edges = edges, build_parameters=build_parameters, **self._tags)
         except Exception as e:
             print(f'Failed to build the pyramidal roof becuase of {e}. Falling back on FlatRoof')
             roof_builder = OSMFlatRoof(self)
-            roof_builder.build_roof(bm = bm, roof_verts = top_verts, roof_edges = edges, build_parameters=build_parameters)
+            roof_builder.build_roof(bm = bm, roof_verts = top_verts, roof_edges = edges, build_parameters=build_parameters, **self._tags)
 
         #bmesh.ops.triangulate(bm, faces=[bottom_face], quad_method='BEAUTY', ngon_method='BEAUTY')
         return bm
