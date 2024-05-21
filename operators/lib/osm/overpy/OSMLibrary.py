@@ -254,6 +254,9 @@ class OSMLibrary(object):
         layer = bpy.data.collections.new('OSM')
         context.scene.collection.children.link(layer)
         osm_built = []
+        print('Building the following object type:')
+        for e in self._class_collection_map.keys():
+            print(f'    - {e}')
         for element_type in self._class_collection_map.keys():
             built_objects = element_type.build(self, 
                                geoscn = geoscn, 
@@ -261,8 +264,9 @@ class OSMLibrary(object):
                                ray_caster = ray_caster, 
                                build_parameters = build_parameters)
             if built_objects is None:
-                print(f'BUULD OBJECTS IS NONE AFTER {element_type}')
+                print(f'Build objects is none {element_type}')
             if not separate and len(built_objects)>0:
+                print(f'merging objects')
                 base_object = bpy.context.scene.objects.get(element_type.blender_mesh_name, next(iter(built_objects)))
 
                 with bpy.context.temp_override(active_object=base_object, selected_objects=list(built_objects.union([base_object])), selected_editable_objects=list(built_objects.union([base_object]))):
@@ -272,7 +276,7 @@ class OSMLibrary(object):
                 built_objects = [base_object]
 
             osm_built.extend(built_objects)
-
+        print('finished the build process')
         return osm_built
 
     @classmethod
