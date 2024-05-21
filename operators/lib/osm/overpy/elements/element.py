@@ -164,20 +164,21 @@ class OSMElement(ABC):
 
     @classmethod
     def build(cls, library: OSMLibrary, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={}) -> set[bpy.types.Object]:
-        pr = cProfile.Profile()
-        pr.enable()
+        #pr = cProfile.Profile()
+        #pr.enable()
+        print(f'{cls} building')
         built_objects = []
         for part in library.get_elements(cls).values():
             if part.is_built or not part._is_valid:
                 continue
             built_objects.append(part.build_instance(geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters))
-        pr.disable()
-        s = io.StringIO()
-        sortby = SortKey.CUMULATIVE
-        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-        ps.print_stats()
-        print(f'Profile of {cls} building')
-        print(s.getvalue())
+        #pr.disable()
+        #s = io.StringIO()
+        #sortby = SortKey.CUMULATIVE
+        #ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+        #ps.print_stats()
+        print(f'{cls} built')
+        #print(s.getvalue())
         # obj = bpy.data.objects.new("top layey",None)
         # geoscn.scn.collection.objects.link(obj)
         # obj.select_set(True)
