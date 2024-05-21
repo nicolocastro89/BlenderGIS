@@ -317,18 +317,18 @@ class OSMMultipolygon(object):
         return success
 
     
-    def get_edges(self, bm, geoscn, reproject, ray_caster:DropToGround=None)->"list":
+    def get_edges(self, bm, geoscn, reproject, ray_caster:DropToGround=None, build_parameters:dict={})->"list":
         edges=[]
         for way in self.ways:
-            vertices = way.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster)
+            vertices = way.get_vertices(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, straight_line_toll=build_parameters.get('straight_line_threshold',4.5))
             shifted_vert = itertools.cycle(vertices)
             next(shifted_vert)
             edge_verts = zip(vertices, shifted_vert)
             for v in edge_verts:
                 try:
-                    edges.extend(bm.edges.new(v))
-                except:
-                    print(f'Failed to create edge between {v[0]} and {v[1]} in way {way._id}')
+                    edges.append(bm.edges.new(v))
+                except Exception as e:
+                    print(f'Failed to create edge between {v[0]} and {v[1]} in way {way._id}. {e}')
             
         return edges
 
@@ -381,6 +381,11 @@ class OSMMultiPolygonRelation(OSMRelation):
 
         
         self._is_preprocessed = True
+
+    def build_instance(self, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict = {}) -> bpy.types.Object|None:
+        for member_element in self.members.values():
+            member_element.element.build_instance(geoscn, reproject, ray_caster, build_parameters)
+
 
     def generate_polygons(self):
         self.outer = {}
@@ -484,119 +489,6 @@ class OSMBuildingRelation(OSMRelation, OSMBuilding):
                 member.element.outline = outline_element
                 outline_element._parts.append(member.element)
 
-############################################
-# This does not make sense as the elements #
-# could simply bubble up one level         #
-############################################
-# class OSMBuildingPartRelation(OSMRelation, OSMBuildingPart):
-#     ''' A building relation which defines a building part
-#     '''
-
-#     _osm_relation_type: ClassVar[str] = 'building:part'
-#     detail_level: ClassVar[int] = 2
-
-#     members: OrderedDict[int, OSMRelationMember]
-
-#     def __init__(self, **kwargs) -> None:
-#         super(OSMBuildingPartRelation, self).__init__(**kwargs)
-
-#         return
-
-#     @classmethod
-#     def is_valid(cls, element) -> bool:
-#         return super(OSMBuildingPartRelation, cls).is_valid(element)
-
-#     @classmethod
-#     def is_valid_xml(cls, xml_element: Element) -> bool:
-#         return super(OSMBuildingPartRelation, cls).is_valid_xml(xml_element) and any(
-#             child.get('k', None) == 'type'
-#             and child.get('v', None) == cls._osm_relation_type
-#             for child in xml_element.findall('tag'))
-
-#     @classmethod
-#     def is_valid_json(cls, json_element) -> bool:
-#         return super(OSMBuildingPartRelation,
-#                      cls).is_valid_json(json_element) and json_element.get(
-#                          'tags', {}).get('type', None) == cls._osm_relation_type
-
-#     def preprocess_instance(self):
-#         """Preprocess the relationship. Does the following in order:
-#         - Adding a reference to the way in all nodes referenced
-#         - Find and store a reference to all members part of the relationship
-#         - Find the outline way
-#         - Assign the other parts to the outline (Might be useless as already done by individual parts)
-#         """
-#         super(OSMBuildingPartRelation, self).preprocess_instance()
-
-#         outline_id, outline_element = next(
-#             ((member_id, member)
-#              for (member_id, member) in self.members.items()
-#              if member.role == 'outline'), (None, None))
-#         if outline_element is None or not (
-#                 isinstance(outline_element, OSMBuilding) or
-#             (isinstance(outline_element, OSMRelation)
-#              and 'building' in outline_element._tags)):
-#             self._is_valid = False
-#             return
-#         for (member_id, member) in self.members.items():
-#             if member_id is not outline_id and member.role == 'part':
-#                 member.element.outline = outline_element
-#                 outline_element._parts.append(member.element)
-
-        
-
-#     def assign_to_parent(self):
-#         #Find which building the part belongs to
-#         from .relation import OSMRelation
-#         relation = next((r for r in self._library.get_elements(OSMRelation).values() if self._id in r.members), None)
-#         if relation:
-#             outline_id = relation.outline
-#             outline = self._library.get_element_by_id(outline_id)
-#             if isinstance(outline, OSMBuilding):
-#                 outline.add_part(self)
-#             return
-
-
-#         # If no relation is found find the building which uses all/most of the nodes in the part 
-        
-#         shared_by = {} # Dictionary of building Ids and how many nodes are encompassed by it
-
-#         free_node = None
-#         for node in self._nodes:
-#             referenced_by = node.get_referenced_from()[OSMBuilding]
-#             if node._id in referenced_by:
-#                 for ref in referenced_by:
-#                     shared_by[ref] = shared_by.get(ref, 0) + 1
-#             else:
-#                 if free_node is None:
-#                     free_node = node._id
-        
-#         # Find the building parts with the most candidates
-#         max_references = max((len(s) for s in shared_by.values()), default = None)
-#         candidates = [b for b in shared_by.keys() if len(shared_by[b])==max_references] if max_references else []
-
-#         # If not all nodes are withing a building check if the parts is ray cast within a building
-#         if free_node:
-#             if len(candidates) == 1:
-#                 # To save time we won't check if all free OSM nodes of <part>
-#                 # are located inside the building
-#                 self._library.get_element_by_id(candidates[0]).add_part(self)
-#             else:
-#                 # Take the first encountered free node <freeNode> and
-#                 # calculated if it is located inside any building from <self.buildings>
-#                 bvhTree = self._library.bvh_tree
-#                 coords = next(n for n in self._nodes if n._id == free_node)
-#                 # Cast a ray from the point with horizontal coords equal to <coords> and
-#                 # z = -1. in the direction of <zAxis>
-#                 buildingIndex = bvhTree.ray_cast((coords[0], coords[1], -1.), zAxis)[2]
-#                 if not buildingIndex is None:
-#                     # we consider that <part> is located inside <buildings[buildingIndex]>
-#                     self._library.get_element_by_id(buildingIndex).add_part(self)
-#         else:
-#             # all OSM nodes of <part> are used by one or more buildings from <self.buildings>
-#             # the case numCandidates > 1 probably means some weird configuration, so skip that <part>
-#             if len(candidates) == 1:
-#                 self._library.get_element_by_id(candidates[0]).add_part(self)
 
 
 class OSMMultiPolygonBuildingRelation(OSMMultiPolygonRelation, OSMBuildingRelation):
@@ -639,7 +531,7 @@ class OSMMultiPolygonBuildingRelation(OSMMultiPolygonRelation, OSMBuildingRelati
 
     
     def build_instance(self, geoscn, reproject, ray_caster = None, build_parameters:dict = {}) -> bpy.types.Object|None:
-
+        print(f'Building {self._id}')
         bm = bmesh.new()
         self._build_instance(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
 
@@ -655,7 +547,7 @@ class OSMMultiPolygonBuildingRelation(OSMMultiPolygonRelation, OSMBuildingRelati
         return obj
             
     def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
-        edges =[e for polygon in self.polygons for e in polygon.get_edges(bm, geoscn=geoscn,reproject=reproject, ray_caster=ray_caster)]
+        edges =[e for polygon in self.polygons for e in polygon.get_edges(bm, geoscn=geoscn,reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)]
 
         fill = bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=True, edges=edges)
 
@@ -711,8 +603,7 @@ class OSMMultiPolygonBuildingRelation(OSMMultiPolygonRelation, OSMBuildingRelati
             bmesh.ops.translate(bm, verts=verts, vec=vect)
 
         return bm
-    
-    
+      
 class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPart):
     ''' A polygon relation which defines a building part
     Notes: the relation can have a building:levels, building:min_level tag
@@ -849,7 +740,7 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
         return
     
     def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
-        edges =[e for polygon in self.polygons for e in polygon.get_edges(bm, geoscn=geoscn,reproject=reproject, ray_caster=ray_caster)]
+        edges =[e for polygon in self.polygons for e in polygon.get_edges(bm, geoscn=geoscn,reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)]
 
         fill = bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=True, edges=edges)
 
@@ -906,4 +797,87 @@ class OSMMultiPolygonBuildingPartRelation(OSMMultiPolygonRelation, OSMBuildingPa
 
         return bm
     
-   
+class OSMMultiPolygonTrackRelation(OSMMultiPolygonRelation):
+    ''' A polygon relation which defines a building
+    '''
+
+    _osm_relation_type: ClassVar[str] = 'multipolygon'
+    _osm_relation_tags: ClassVar["list['str']"] = ['leisure']
+    detail_level: ClassVar[int] = 3
+
+    polygons: list[OSMMultipolygon]
+    _parts: list[OSMMultiPolygonRelation]
+
+    def __str__(self):
+        return f"OSMMultipolygonTrackRelation with id: {self._id}, made up of {len(self.members)} members(s) and tags:\n{pprint.pformat(self._tags)}"
+    
+    def __init__(self, **kwargs) -> None:
+        self.polygons = []
+        self._parts = []
+        super(OSMMultiPolygonTrackRelation, self).__init__(**kwargs)
+
+        return
+
+    @classmethod
+    def is_valid_data(cls, element) -> bool:
+        return super(OSMMultiPolygonTrackRelation, cls).is_valid_data(element)
+
+    @classmethod
+    def is_valid_xml(cls, xml_element: Element) -> bool:
+        return super(OSMMultiPolygonTrackRelation, cls).is_valid_xml(xml_element) and any(
+            child.get('k', None) == 'leisure'
+            and child.get('v', None) == 'track'
+            for child in xml_element.findall('tag'))
+
+    @classmethod
+    def is_valid_json(cls, json_element) -> bool:
+        return super(OSMMultiPolygonTrackRelation,
+                     cls).is_valid_json(json_element) and json_element.get(
+                         'tags', {}).get('leisure', None) == 'track'
+
+    
+    def build_instance(self, geoscn, reproject, ray_caster = None, build_parameters:dict = {}) -> bpy.types.Object|None:
+        print(f'Building {self._id}')
+        bm = bmesh.new()
+        self._build_instance(bm, geoscn=geoscn, reproject=reproject, ray_caster=ray_caster, build_parameters = build_parameters)
+
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
+        mesh = bpy.data.meshes.new(f"{self._id}")
+        bm.to_mesh(mesh)
+        bm.free()
+        mesh.update()#calc_edges=True)
+        mesh.validate()
+        obj = bpy.data.objects.new(f"{self._id}", mesh)
+        geoscn.scn.collection.objects.link(obj)
+        obj.select_set(True)
+        return obj
+            
+    def _build_instance(self, bm, geoscn, reproject, ray_caster:DropToGround = None, build_parameters:dict={})->bmesh:
+        edges =[e for polygon in self.polygons for e in polygon.get_edges(bm, geoscn=geoscn,reproject=reproject, ray_caster=ray_caster, build_parameters=build_parameters)]
+
+        fill = bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=True, edges=edges)
+
+        
+
+        #Extrude
+        
+        # if build_parameters.get('extrusion_axis', 'Z') == 'NORMAL':
+        #     normal = face.normal
+        #     vect = normal * offset
+        # elif build_parameters.get('extrusion_axis', 'Z') == 'Z':
+        vect = (0, 0, 1)
+
+        # for f in geom["geom"]:
+        #     if isinstance(f, bmesh.types.BMFace):
+        extruded = bmesh.ops.extrude_face_region(bm, geom=fill['geom']) #return {'faces': [BMFace]}
+        verts = [v for v in extruded['geom'] if isinstance(v, bmesh.types.BMVert)]
+        if ray_caster:
+            #Making flat roof
+            z = max([v.co.z for v in verts]) + 1 #get max z coord
+            for v in verts:
+                v.co.z = z
+        else:
+            bmesh.ops.translate(bm, verts=verts, vec=vect)
+
+        return bm
+      
