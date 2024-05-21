@@ -1,11 +1,14 @@
 
 from __future__ import annotations
+import itertools
+from numbers import Number
 import os 
 import re
 import bpy, bmesh
 import addon_utils 
 from ... import bl_info
 from mathutils import Vector
+from .bgis_utils import DropToGround
 BOC = bpy.ops.curve
 
 def appendObjectsFromFile(filepath, collection, names:list[str]|str):
@@ -35,7 +38,10 @@ def appendObjectsFromAssets(assetFile:str, collection, names:list[str]|str):
         return appendObjectsFromFile(os.path.join(dirpath,'assets',assetFile), collection, names)
     return []
 
-def createCollection(name, parent=None, hide_viewport=False, hide_select=False, hide_render=False)->Collection:
+def createCollection(name, parent=None, hide_viewport=False, hide_select=False, hide_render=False)->bpy.types.Collection:
+    collection = bpy.data.collections.get(name,None)
+    if collection:
+        return collection
     collection = bpy.data.collections.new(name)
     if not parent:
         parent = bpy.context.scene.collection
@@ -50,7 +56,6 @@ def almost_overlapping(point1: Vector, point2: Vector, max_distance = 0.5):
     
 def xy_distance(point1: Vector, point2: Vector):
     return (point1.xy-point2.xy).magnitude
-
 
 def add_spline_point(end_point, location):
     BOC.select_all(action='DESELECT')
@@ -177,32 +182,9 @@ def merge_splines(curve_object, spline1, control_point_1, spline2, control_point
     finally:
         bpy.context.view_layer.objects.active = current_active
         bpy.ops.object.mode_set(mode = 'OBJECT')
-        # control_point_1.select_control_point = True
-        # control_point_1.select_left_handle = True
-        # control_point_1.select_right_handle = True
-
-        # control_point_2.select_control_point = True
-        # control_point_2.select_left_handle = True
-        # control_point_2.select_right_handle = True
-
-        # bpy.ops.curve.bpy.ops.curve()
-            
-
-        # if area.type == 'VIEW_3D':
-        #     override["area"] = area
-        #     with bpy.context.temp_override(**override):
-        #         mode = bpy.context.active_object.mode
-        #         if mode == 'OBJECT':
-        #             bpy.ops.object.mode_set(mode='EDIT')
-        #         BOC.select_all(action='DESELECT')
-        #         select_spline_point(control_point_1)
-        #         select_spline_point(control_point_2)
-        #         BOC.bpy.ops.curve()
-
-        #         if mode=='OBJECT':
-        #             bpy.ops.object.mode_set(mode=mode)
-
+        
 def solidify_terrain(elevObj:bmesh.types.Object)->bmesh.types.Object:
+    print('solidifying terrain')
     with bpy.context.temp_override(active_object=elevObj, object=elevObj, selected_objects= [elevObj], selected_editable_objects= [elevObj]):
             for modifier in elevObj.modifiers:
                 bpy.ops.object.modifier_apply(modifier=modifier.name)
@@ -219,8 +201,55 @@ def solidify_terrain(elevObj:bmesh.types.Object)->bmesh.types.Object:
     mesh.validate()
     obj = bpy.data.objects.new(f"{elevObj.name}_Solid", mesh)
     bpy.context.scene.collection.objects.link(obj)
+    print('solidifying terrain finished')
     return obj  
 
+def create_prism_from_vertices(bm: bmesh.types.BMesh, vertices: list[bmesh.types.BMVert], height:Number, ray_caster:DropToGround = None, extrusion_axis = 'Z'):
+    shifted_vert = itertools.cycle(vertices)
+    try:
+        next(shifted_vert)
+    except Exception as e:
+        print(e)
+        raise e
+        
+    edges=[]
+    for v in zip(vertices,shifted_vert):
+        if v[1] not in [x for y in [a.verts for a in v[0].link_edges] for x in y if x != v[0]]:
+            edges.append(bm.edges.new(v))
+    try:
+        face = bm.faces.new(vertices)
+    except:
+        pass
+
+    
+    face.normal_update()
+    if face.normal.z > 0:
+        face.normal_flip()
+
+    
+    extrusion = bmesh.ops.extrude_face_region(bm, geom=[face]+edges, use_keep_orig=True) 
+
+    faces = [f for f in extrusion['geom'] if isinstance(f,bmesh.types.BMFace)]
+    verts = [v for v in faces[0].verts]
+    edges = [e for e in faces[0].edges]
+
+    up_face = face if face.normal.z>0 else faces[0]
+    
+    if ray_caster:
+        #Making flat roof
+        z = max([v.co.z for v in up_face.verts]) + height #get max z coord
+        for v in up_face.verts:
+            v.co.z = z
+    else:
+        if extrusion_axis == 'NORMAL':
+            normal = face.normal
+            vect = normal * height
+        elif extrusion_axis == 'Z':
+            vect =(0, 0,  height)
+        bmesh.ops.translate(bm, verts=up_face.verts, vec=vect)
+
+    
+                
 def polish_mesh(bm: bmesh.types.BMesh):
     # Remove double vertices
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001) #merge vertices less than 1mm
