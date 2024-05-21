@@ -62,6 +62,8 @@ DEFAULT_OSM_TAGS = [
 	'highway',
 	'landuse',
 	'leisure',
+	'amenity',
+	"barrier",
 	'natural',
 	'railway',
 	'waterway'
