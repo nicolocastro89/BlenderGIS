@@ -6,6 +6,9 @@ import random
 
 import logging
 
+from .utils.blender import createCollection
+
+
 from .lib.osm.overpy.OSMLibrary import OSMLibrary
 log = logging.getLogger(__name__)
 
@@ -83,16 +86,18 @@ def queryBuilder(bbox, tags=['building', 'highway'], types=['node', 'way', 'rela
 			union += '>;);'
 		#all relations (no filter tag applied)
 		if 'relation' in types or 'rel' in types:
-			union += 'relation;(relation[building];>;);' #>;
+			union += '(('
+			if tags:
+				union += ';'.join( [f'relation[\"{tag}\"][!"construction"]' if any(c in tag for c in escape_chars) else f'relation[{tag}]'for tag in tags] ) + ';);'
+			else:
+				union += 'ralation;);'
+			union += '>;);'
+			# union += 'relation;(relation[building];>;);' #>;
 		union += ')'
 
 		output = f';out;'
 		qry = head + union + output
-
 		return qry
-
-
-
 
 
 ########################
@@ -105,8 +110,6 @@ def joinBmesh(src_bm, dest_bm):
 	src_bm.to_mesh(buff)
 	dest_bm.from_mesh(buff)
 	bpy.data.meshes.remove(buff)
-
-
 
 
 
@@ -163,10 +166,11 @@ class OSM_IMPORT():
 	separate: BoolProperty(name='Separate objects', description='Warning : can be very slow with lot of features', default=False)
 
 	buildingsExtrusion: BoolProperty(name='Buildings extrusion', description='', default=True)
-	defaultHeight: FloatProperty(name='Default Height', description='Set the height value using for extrude building when the tag is missing', default=20)
+	defaultHeight: FloatProperty(name='Default Height', description='Set the height value using for extrude building when the tag is missing', default=30)
 	defaultRoofHeight: FloatProperty(name='Default Roof Height', description='Set the height value using for extrude roof when the tag is missing', default=5)
-	levelHeight: FloatProperty(name='Level height', description='Set a height for a building level, using for compute extrude height based on number of levels', default=3)
-	randomHeightThreshold: FloatProperty(name='Random height threshold', description='Threshold value for randomize default height', default=10)
+	levelHeight: FloatProperty(name='Level height', description='Set a height for a building level, using for compute extrude height based on number of levels', default=4)
+	randomHeightThreshold: FloatProperty(name='Random height threshold', description='Threshold value for randomize default height', default=15)
+	straightLineThreshold: FloatProperty(name='Maximum angle for straight line simplification', description='Angle formed by three consecutive nodes below which they are considered a straight line', default=4.5)
 
 
 
@@ -176,7 +180,13 @@ class OSM_IMPORT():
 			'default_roof_height':self.defaultRoofHeight,
 			'random_height_threshold': self.randomHeightThreshold,
 			'level_height': self.levelHeight,
-			'highway_subdivision_size': 20
+			'highway_subdivision_size': 20,
+			'straight_line_threshold':self.straightLineThreshold,
+			'tower_height':35,
+			'bridge_thickness':5,
+			'breakwater_height':10,
+			'fountain_height': 1,
+			'fountain_tiers': 3
 			#'extrusion_axis': self.extrusionAxis
 		}
 
@@ -197,6 +207,7 @@ class OSM_IMPORT():
 			layout.prop(self, 'randomHeightThreshold')
 			layout.prop(self, 'levelHeight')
 		layout.prop(self, 'separate')
+		layout.prop(self, 'straightLineThreshold')
 
 
 	def build(self, context, result, dstCRS):
@@ -779,8 +790,8 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 
 	vertical_slices: IntProperty(name='Vertical Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
 	horizontal_slices: IntProperty(name='Horizontal Slices', description='Set the number of pieces to cut the OSM vertically', default=1)
-	start_at_quadrant: IntProperty(name='Start at quadrant', description='0 based quadrant to start at', default=0)
-	build_n_quadrants: IntProperty(name='Quadrants to build', description='0number of quadrants to build (-1 means all)', default=-1)
+	start_at_quadrant: IntProperty(name='Start at quadrant', description='based quadrant to start at', default=0)
+	build_n_quadrants: IntProperty(name='Quadrants to build', description='number of quadrants to build (-1 means all)', default=-1)
 
 	def draw(self, context):
 		layout = self.layout
@@ -802,6 +813,9 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 		layout.prop(self, 'horizontal_slices')
 		layout.prop(self, 'start_at_quadrant')
 		layout.prop(self, 'build_n_quadrants')
+
+		
+		layout.prop(self, "straightLineThreshold")
 
 	#special function to auto redraw an operator popup called through invoke_props_dialog
 	def check(self, context):
@@ -901,11 +915,19 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 					return {'FINISHED'}
 
 				ray_caster = DropToGround(scn, elevObj) if elevObj else None
-			
+
+				negative_collection = createCollection('NegativeCollection')
+
 				result.preprocess(ray_caster=ray_caster)
 				built_list = result.build(context, ray_caster=ray_caster, separate = False, build_parameters=build_parameters)
+
+				
+
+				
 				solid_terrain = solidify_terrain(aObj or elevObj)
 				solid_terrain.name = f"Quadrent_{q}"
+
+				
 				
 				area_type = 'VIEW_3D' # change this to use the correct Area Type context you want to process in
 				areas  = [area for area in bpy.context.window.screen.areas if area.type == area_type]
@@ -945,6 +967,16 @@ class IMPORTGIS_OT_PIECES_osm_query(Operator, OSM_IMPORT):
 				bpy.context.view_layer.objects.active = aObj
 				aObj.select_set(True)
 
+			# print('Booleaning difference started')
+			# negate = solid_terrain.modifiers.new('NEGATIVE', type='BOOLEAN')
+			# negate.collection = negative_collection
+			# negate.operand_type = 'COLLECTION'
+			# negate.operation = 'DIFFERENCE'
+			# with bpy.context.temp_override(active_object=solid_terrain, object=solid_terrain, selected_objects= [solid_terrain], selected_editable_objects= [solid_terrain]):
+			# 	bpy.ops.object.modifier_apply(modifier=negate.name)
+			# for obj in negative_collection.all_objects:
+			# 	bpy.data.objects.remove(obj)
+			# print('Booleaning difference finished')
 		bbox = getBBOX.fromScn(scn)
 		adjust3Dview(context, bbox, zoomToSelect=False)
 
